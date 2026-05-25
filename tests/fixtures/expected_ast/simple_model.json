@@ -1,0 +1,89 @@
+[
+  {
+    "name": "User",
+    "kind": "struct",
+    "file_path": "simple_model.swift",
+    "superclass": null,
+    "protocols": [],
+    "properties": [
+      {
+        "name": "name",
+        "type": "String",
+        "is_optional": false,
+        "is_let": true,
+        "access_level": "internal",
+        "is_static": false,
+        "injection_style": "init",
+        "has_default": false,
+        "is_computed": false
+      },
+      {
+        "name": "email",
+        "type": "String",
+        "is_optional": false,
+        "is_let": true,
+        "access_level": "internal",
+        "is_static": false,
+        "injection_style": "init",
+        "has_default": false,
+        "is_computed": false
+      }
+    ],
+    "methods": [
+      {
+        "name": "init",
+        "parameters": [
+          {
+            "label": "name",
+            "name": "name",
+            "type": "String",
+            "default_value": null
+          },
+          {
+            "label": "email",
+            "name": "email",
+            "type": "String",
+            "default_value": null
+          }
+        ],
+        "return_type": null,
+        "access_level": "internal",
+        "is_static": false,
+        "is_async": false,
+        "throws": false,
+        "line_count": 4,
+        "body_text": "{\n        self.name = name\n        self.email = email\n    }"
+      },
+      {
+        "name": "isValidEmail",
+        "parameters": [],
+        "return_type": "Bool",
+        "access_level": "internal",
+        "is_static": false,
+        "is_async": false,
+        "throws": false,
+        "line_count": 3,
+        "body_text": "{\n        return email.contains(\"@\") && email.contains(\".\")\n    }"
+      },
+      {
+        "name": "displayName",
+        "parameters": [],
+        "return_type": "String",
+        "access_level": "internal",
+        "is_static": false,
+        "is_async": false,
+        "throws": false,
+        "line_count": 3,
+        "body_text": "{\n        return \"\\(name) <\\(email)>\"\n    }"
+      }
+    ],
+    "imports": [
+      "Foundation"
+    ],
+    "dependencies": [],
+    "is_extension": false,
+    "extends": null,
+    "line_start": 3,
+    "line_end": 19
+  }
+]

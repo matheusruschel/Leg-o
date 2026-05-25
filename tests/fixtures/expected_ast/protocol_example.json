@@ -1,0 +1,194 @@
+[
+  {
+    "name": "PaymentGateway",
+    "kind": "protocol",
+    "file_path": "protocol_example.swift",
+    "superclass": null,
+    "protocols": [],
+    "properties": [],
+    "methods": [],
+    "imports": [
+      "Foundation"
+    ],
+    "dependencies": [],
+    "is_extension": false,
+    "extends": null,
+    "line_start": 3,
+    "line_end": 7
+  },
+  {
+    "name": "PaymentLogger",
+    "kind": "protocol",
+    "file_path": "protocol_example.swift",
+    "superclass": null,
+    "protocols": [],
+    "properties": [],
+    "methods": [],
+    "imports": [
+      "Foundation"
+    ],
+    "dependencies": [],
+    "is_extension": false,
+    "extends": null,
+    "line_start": 9,
+    "line_end": 11
+  },
+  {
+    "name": "PaymentProcessor",
+    "kind": "class",
+    "file_path": "protocol_example.swift",
+    "superclass": null,
+    "protocols": [],
+    "properties": [
+      {
+        "name": "gateway",
+        "type": "PaymentGateway",
+        "is_optional": false,
+        "is_let": true,
+        "access_level": "private",
+        "is_static": false,
+        "injection_style": "init",
+        "has_default": false,
+        "is_computed": false
+      },
+      {
+        "name": "logger",
+        "type": "PaymentLogger",
+        "is_optional": false,
+        "is_let": true,
+        "access_level": "private",
+        "is_static": false,
+        "injection_style": "init",
+        "has_default": false,
+        "is_computed": false
+      },
+      {
+        "name": "maxAmount",
+        "type": "Decimal",
+        "is_optional": false,
+        "is_let": true,
+        "access_level": "private",
+        "is_static": false,
+        "injection_style": "init",
+        "has_default": false,
+        "is_computed": false
+      }
+    ],
+    "methods": [
+      {
+        "name": "init",
+        "parameters": [
+          {
+            "label": "gateway",
+            "name": "gateway",
+            "type": "PaymentGateway",
+            "default_value": null
+          },
+          {
+            "label": "logger",
+            "name": "logger",
+            "type": "PaymentLogger",
+            "default_value": null
+          },
+          {
+            "label": "maxAmount",
+            "name": "maxAmount",
+            "type": "Decimal",
+            "default_value": null
+          }
+        ],
+        "return_type": null,
+        "access_level": "internal",
+        "is_static": false,
+        "is_async": false,
+        "throws": false,
+        "line_count": 5,
+        "body_text": "{\n        self.gateway = gateway\n        self.logger = logger\n        self.maxAmount = maxAmount\n    }"
+      },
+      {
+        "name": "process",
+        "parameters": [
+          {
+            "label": "amount",
+            "name": "amount",
+            "type": "Decimal",
+            "default_value": null
+          }
+        ],
+        "return_type": "String",
+        "access_level": "internal",
+        "is_static": false,
+        "is_async": false,
+        "throws": true,
+        "line_count": 12,
+        "body_text": "{\n        guard amount > 0 else {\n            throw PaymentError.invalidAmount\n        }\n        guard amount <= maxAmount else {\n            throw PaymentError.amountExceedsLimit\n        }\n        logger.log(\"Authorizing \\(amount)\")\n        let txId = try gateway.authorize(amount: amount)\n        try gateway.capture(transactionId: txId)\n        return txId\n    }"
+      },
+      {
+        "name": "refund",
+        "parameters": [
+          {
+            "label": "transactionId",
+            "name": "transactionId",
+            "type": "String",
+            "default_value": null
+          },
+          {
+            "label": "amount",
+            "name": "amount",
+            "type": "Decimal",
+            "default_value": null
+          }
+        ],
+        "return_type": null,
+        "access_level": "internal",
+        "is_static": false,
+        "is_async": false,
+        "throws": true,
+        "line_count": 4,
+        "body_text": "{\n        logger.log(\"Refunding \\(amount) for \\(transactionId)\")\n        try gateway.refund(transactionId: transactionId, amount: amount)\n    }"
+      }
+    ],
+    "imports": [
+      "Foundation"
+    ],
+    "dependencies": [
+      {
+        "type_name": "PaymentGateway",
+        "injection_style": "init",
+        "is_protocol": false,
+        "is_singleton": false,
+        "is_system_framework": false
+      },
+      {
+        "type_name": "PaymentLogger",
+        "injection_style": "init",
+        "is_protocol": false,
+        "is_singleton": false,
+        "is_system_framework": false
+      }
+    ],
+    "is_extension": false,
+    "extends": null,
+    "line_start": 13,
+    "line_end": 42
+  },
+  {
+    "name": "PaymentError",
+    "kind": "enum",
+    "file_path": "protocol_example.swift",
+    "superclass": null,
+    "protocols": [
+      "Error"
+    ],
+    "properties": [],
+    "methods": [],
+    "imports": [
+      "Foundation"
+    ],
+    "dependencies": [],
+    "is_extension": false,
+    "extends": null,
+    "line_start": 44,
+    "line_end": 47
+  }
+]

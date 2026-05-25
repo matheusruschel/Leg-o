@@ -1,0 +1,95 @@
+[
+  {
+    "name": "NetworkServiceProtocol",
+    "kind": "protocol",
+    "file_path": "network_service.swift",
+    "superclass": null,
+    "protocols": [],
+    "properties": [],
+    "methods": [],
+    "imports": [
+      "Foundation"
+    ],
+    "dependencies": [],
+    "is_extension": false,
+    "extends": null,
+    "line_start": 3,
+    "line_end": 5
+  },
+  {
+    "name": "NetworkService",
+    "kind": "class",
+    "file_path": "network_service.swift",
+    "superclass": null,
+    "protocols": [
+      "NetworkServiceProtocol"
+    ],
+    "properties": [
+      {
+        "name": "session",
+        "type": "URLSession",
+        "is_optional": false,
+        "is_let": true,
+        "access_level": "private",
+        "is_static": false,
+        "injection_style": "init",
+        "has_default": false,
+        "is_computed": false
+      }
+    ],
+    "methods": [
+      {
+        "name": "init",
+        "parameters": [
+          {
+            "label": "session",
+            "name": "session",
+            "type": "URLSession",
+            "default_value": null
+          }
+        ],
+        "return_type": null,
+        "access_level": "internal",
+        "is_static": false,
+        "is_async": false,
+        "throws": false,
+        "line_count": 3,
+        "body_text": "{\n        self.session = session\n    }"
+      },
+      {
+        "name": "fetchUsers",
+        "parameters": [
+          {
+            "label": "completion",
+            "name": "completion",
+            "type": "(Result<[User], Error>) -> Void",
+            "default_value": null
+          }
+        ],
+        "return_type": null,
+        "access_level": "internal",
+        "is_static": false,
+        "is_async": false,
+        "throws": false,
+        "line_count": 11,
+        "body_text": "{\n        let url = URL(string: \"https://example.com/users\")!\n        let task = session.dataTask(with: url) { data, _, error in\n            if let error = error {\n                completion(.failure(error))\n                return\n            }\n            completion(.success([]))\n        }\n        task.resume()\n    }"
+      }
+    ],
+    "imports": [
+      "Foundation"
+    ],
+    "dependencies": [
+      {
+        "type_name": "URLSession",
+        "injection_style": "init",
+        "is_protocol": false,
+        "is_singleton": false,
+        "is_system_framework": false
+      }
+    ],
+    "is_extension": false,
+    "extends": null,
+    "line_start": 7,
+    "line_end": 26
+  }
+]
