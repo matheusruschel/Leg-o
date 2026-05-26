@@ -10,6 +10,9 @@ from ..models import ClassMetadata, TestabilityResult
 
 _TEMPLATE_PATH = Path(__file__).parent / "templates" / "testability.txt"
 _BATCH_SIZE = 50
+# Each assessment is ~400 output tokens (multiple lists per class). At batch_size=50
+# we need ~20K headroom. Sonnet's 8K default would truncate; size up generously.
+_ANALYZE_MAX_TOKENS = 16_000
 
 
 def _load_template() -> str:
@@ -38,6 +41,7 @@ def assess_testability(
         response = claude_client.call_json(
             [{"role": "user", "content": prompt}],
             call_type="analysis",
+            max_tokens=_ANALYZE_MAX_TOKENS,
         )
         assessments = response.get("assessments", []) if isinstance(response, dict) else []
         for item in assessments:

@@ -10,6 +10,21 @@ from .models import ClassMetadata
 _POD_LINE_RE = re.compile(r"^\s*-\s+([A-Za-z0-9_]+)(?:/[^\s]+)?\s+\(")
 
 
+def resolve_pod_modules(
+    project_path: Path,
+    extra_modules: list[str] | None = None,
+    enabled: bool = True,
+) -> set[str]:
+    """High-level helper: walk up from project_path for a Podfile.lock, parse it,
+    and merge with any user-supplied extra modules. Returns empty set if disabled."""
+    modules: set[str] = set(extra_modules or [])
+    if enabled:
+        lockfile = find_podfile_lock(project_path)
+        if lockfile is not None:
+            modules.update(parse_pod_modules(lockfile))
+    return modules
+
+
 def find_podfile_lock(project_path: Path) -> Path | None:
     """Walk up from project_path looking for a Podfile.lock."""
     p = Path(project_path).resolve()

@@ -32,6 +32,7 @@ def prioritize_methods(
     response = claude_client.call_json(
         [{"role": "user", "content": prompt}],
         call_type="analysis",
+        max_tokens=8_000,
     )
 
     items = response if isinstance(response, list) else response.get("methods", [])

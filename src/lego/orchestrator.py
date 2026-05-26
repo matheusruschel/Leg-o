@@ -26,8 +26,7 @@ from .models import (
 )
 from .pod_detector import (
     classes_skipped_by_pod_import,
-    find_podfile_lock,
-    parse_pod_modules,
+    resolve_pod_modules,
 )
 from .scanner import file_discovery, objc_scanner, swift_scanner
 from .validator.feedback_loop import FeedbackLoopConfig, validate_and_fix
@@ -176,13 +175,11 @@ def autodetect_workspace(xcodeproj: Path) -> Path | None:
 
 
 def _resolve_pod_modules(config: PipelineConfig) -> set[str]:
-    pods: set[str] = set(config.extra_skip_modules or [])
-    if config.skip_pod_dependent:
-        lockfile = find_podfile_lock(config.path)
-        if lockfile is not None:
-            pods.update(parse_pod_modules(lockfile))
-            log.info("loaded %d pod modules from %s", len(pods), lockfile)
-    return pods
+    return resolve_pod_modules(
+        config.path,
+        extra_modules=config.extra_skip_modules,
+        enabled=config.skip_pod_dependent,
+    )
 
 
 def _scan(config: PipelineConfig) -> tuple[list[SwiftFile], list[ClassMetadata]]:

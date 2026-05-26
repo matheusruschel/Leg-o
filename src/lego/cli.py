@@ -11,6 +11,7 @@ from .analyzer import assess_testability, filter_testable, prioritize_methods, a
 from .llm import ClaudeClient
 from .orchestrator import PipelineConfig, autodetect_workspace, run_pipeline
 from .models import GenerationPlan
+from .pod_detector import classes_skipped_by_pod_import, resolve_pod_modules
 from .reporter import generate_report
 
 
@@ -223,6 +224,10 @@ _EST_OUTPUT_TOKENS_PER_METHOD = 1500  # generated test code
 @click.option("--include-objc", is_flag=True, default=False)
 @click.option("--batch-size", default=50, type=int)
 @click.option("--method-limit", default=50, type=int)
+@click.option("--no-skip-pods", is_flag=True, default=False,
+              help="Don't auto-skip classes that import CocoaPods modules.")
+@click.option("--skip-module", "skip_modules", multiple=True,
+              help="Additional module name(s) to treat as un-mockable; classes importing these are skipped.")
 def estimate(
     path: Path,
     api_key: str,
@@ -230,6 +235,8 @@ def estimate(
     include_objc: bool,
     batch_size: int,
     method_limit: int,
+    no_skip_pods: bool,
+    skip_modules: tuple[str, ...],
 ) -> None:
     """Scan + analyze + project the cost of generating tests, without generating."""
     files = file_discovery.discover_files(path, include_objc=include_objc)
@@ -239,6 +246,14 @@ def estimate(
             all_classes.extend(swift_scanner.scan_file(sf))
         else:
             all_classes.extend(objc_scanner.scan_file(sf))
+
+    pod_modules = resolve_pod_modules(
+        path, extra_modules=list(skip_modules), enabled=not no_skip_pods,
+    )
+    pod_skipped = 0
+    if pod_modules:
+        all_classes, skipped = classes_skipped_by_pod_import(all_classes, pod_modules)
+        pod_skipped = len(skipped)
 
     client = ClaudeClient(api_key=api_key, model=model)
     assessments = assess_testability(all_classes, client, batch_size=batch_size)
@@ -256,6 +271,8 @@ def estimate(
 
     summary = {
         "files_scanned": len(files),
+        "total_classes": len(all_classes) + pod_skipped,
+        "pod_skipped_classes": pod_skipped,
         "classes_analyzed": len(all_classes),
         "testable_classes": len(testable),
         "prioritized_methods": len(ranked),
