@@ -1,0 +1,168 @@
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+
+from lego.llm.token_tracker import TokenTracker
+from lego.orchestrator import PipelineConfig, run_pipeline
+from lego.reporter import generate_report
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+SAMPLE_TEST = (FIXTURES / "generator" / "SampleNetworkServiceTests.swift").read_text()
+
+
+def _make_client(tracker: TokenTracker | None = None) -> MagicMock:
+    client = MagicMock()
+    client.tracker = tracker or TokenTracker(model="default")
+    return client
+
+
+def _assessment_response(class_names):
+    return {
+        "assessments": [
+            {
+                "class_name": name,
+                "testable": True,
+                "testability_score": 80,
+                "dependencies": [],
+                "blocking_issues": [],
+                "refactoring_suggestions": [],
+                "testable_methods": ["foo"],
+                "untestable_methods": [],
+            }
+            for name in class_names
+        ]
+    }
+
+
+def _prioritize_response(class_names):
+    return [
+        {"class_name": name, "method_name": "foo", "priority_score": 90, "reason": "logic"}
+        for name in class_names
+    ]
+
+
+def test_run_pipeline_end_to_end_with_validation_skipped(tmp_path: Path):
+    # Use the existing Swift fixtures dir; analyze + generate via mocked Claude.
+    src = FIXTURES  # scanner will skip our Tests.swift fixture by name
+    output_dir = tmp_path / "out"
+
+    client = _make_client()
+    # Call sequence: assess (1 batch) → prioritize → N generations (one per class).
+    # The scanner finds several classes; assess returns testable for two of them.
+    client.call_json.side_effect = [
+        _assessment_response(["NetworkService", "SimpleModel"]),
+        _prioritize_response(["NetworkService", "SimpleModel"]),
+    ]
+    client.call.return_value = SAMPLE_TEST
+
+    config = PipelineConfig(
+        path=src,
+        output_dir=output_dir,
+        module_name="MyApp",
+        method_limit=10,
+    )
+    report = run_pipeline(config, client)
+
+    assert report.files_scanned >= 1
+    assert report.classes_analyzed >= 1
+    assert report.testable_classes == 2
+    assert report.tests_generated >= 1
+    # No xcodeproj → validation skipped → status "generated_unverified"
+    statuses = {r.status for r in report.class_results}
+    assert "generated_unverified" in statuses
+    # Output files exist on disk
+    written = list(output_dir.glob("*Tests.swift"))
+    assert len(written) >= 1
+    # Token usage populated
+    assert "total_input_tokens" in report.token_usage
+
+
+def test_run_pipeline_dry_run_skips_generation(tmp_path: Path):
+    client = _make_client()
+    client.call_json.side_effect = [
+        _assessment_response(["NetworkService"]),
+        _prioritize_response(["NetworkService"]),
+    ]
+
+    config = PipelineConfig(
+        path=FIXTURES,
+        output_dir=tmp_path / "out",
+        dry_run=True,
+        method_limit=10,
+    )
+    report = run_pipeline(config, client)
+
+    client.call.assert_not_called()  # no generation API calls in dry-run
+    assert all(r.status == "skipped" for r in report.class_results)
+
+
+def test_run_pipeline_single_file_skips_analysis(tmp_path: Path):
+    target_file = FIXTURES / "network_service.swift"
+    client = _make_client()
+    client.call.return_value = SAMPLE_TEST
+
+    config = PipelineConfig(
+        path=FIXTURES,
+        output_dir=tmp_path / "out",
+        single_file=target_file,
+    )
+    report = run_pipeline(config, client)
+
+    client.call_json.assert_not_called()  # no analyze calls
+    assert report.classes_analyzed >= 1
+    # All generated classes came from the single file
+    for r in report.class_results:
+        assert r.output_path is not None
+        assert r.output_path.parent == tmp_path / "out"
+
+
+def test_run_pipeline_invokes_validation_when_configured(tmp_path: Path):
+    target_file = FIXTURES / "network_service.swift"
+    client = _make_client()
+    client.call.return_value = SAMPLE_TEST
+
+    compile_fn = MagicMock(return_value=(True, "** BUILD SUCCEEDED **"))
+    run_fn = MagicMock(return_value=(True, "** TEST SUCCEEDED **"))
+
+    config = PipelineConfig(
+        path=FIXTURES,
+        output_dir=tmp_path / "out",
+        single_file=target_file,
+        xcodeproj=tmp_path / "App.xcodeproj",
+        scheme="App",
+        test_target_dir=tmp_path / "out",
+        max_retries=1,
+    )
+    report = run_pipeline(config, client, compile_fn=compile_fn, run_fn=run_fn)
+
+    compile_fn.assert_called()
+    run_fn.assert_called()
+    # First-pass rate should be 1.0 (compiled cleanly on first try)
+    assert report.first_pass_compile_rate == 1.0
+    assert report.final_pass_rate == 1.0
+    assert all(r.status == "passed" for r in report.class_results)
+
+
+def test_generate_report_renders_markdown_sections(tmp_path: Path):
+    target_file = FIXTURES / "network_service.swift"
+    client = _make_client()
+    client.call.return_value = SAMPLE_TEST
+
+    config = PipelineConfig(
+        path=FIXTURES,
+        output_dir=tmp_path / "out",
+        single_file=target_file,
+    )
+    report = run_pipeline(config, client)
+    md = generate_report(report)
+
+    assert "# Test Generation Report" in md
+    assert "## Summary" in md
+    assert "## Per-Class Results" in md
+    assert "## Token Usage" in md
+    # Should mention at least one class name from the fixture
+    assert "NetworkService" in md

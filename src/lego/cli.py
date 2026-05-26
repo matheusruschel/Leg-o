@@ -9,6 +9,8 @@ import click
 from .scanner import file_discovery, swift_scanner, objc_scanner
 from .analyzer import assess_testability, filter_testable, prioritize_methods, apply_limit
 from .llm import ClaudeClient
+from .orchestrator import PipelineConfig, run_pipeline
+from .reporter import generate_report
 
 
 @click.group()
@@ -94,29 +96,120 @@ def analyze(
 
 @main.command()
 @click.option("--path", "path", required=True, type=click.Path(exists=True, path_type=Path))
-@click.option("--output", "output", required=True, type=click.Path(path_type=Path))
-@click.option("--api-key", envvar="ANTHROPIC_API_KEY", default=None)
-@click.option("--model", default="claude-sonnet-4-20250514")
+@click.option("--output", "output", required=True, type=click.Path(path_type=Path),
+              help="Directory to write generated test files (and REPORT.md).")
+@click.option("--api-key", envvar="ANTHROPIC_API_KEY", required=True)
+@click.option("--model", default="claude-sonnet-4-5-20250929")
+@click.option("--module-name", default="App", help="Swift module name for @testable import.")
 @click.option("--xcodeproj", type=click.Path(path_type=Path), default=None)
 @click.option("--scheme", default=None)
+@click.option("--test-target-dir", type=click.Path(path_type=Path), default=None)
 @click.option("--max-retries", default=3, type=int)
-@click.option("--dry-run", is_flag=True, default=False)
-@click.option("--single-file", is_flag=True, default=False)
-@click.option("--batch-size", default=10, type=int)
+@click.option("--dry-run", is_flag=True, default=False,
+              help="Run scan + analyze; skip API generation calls.")
+@click.option("--single-file", type=click.Path(exists=True, path_type=Path), default=None,
+              help="Generate tests only for classes in this file (skips analyze).")
+@click.option("--batch-size", default=50, type=int)
+@click.option("--method-limit", default=50, type=int)
 @click.option("--include-objc", is_flag=True, default=False)
-def generate(**_: object) -> None:
-    """Full pipeline (not yet implemented)."""
-    click.echo("generate: not implemented yet", err=True)
-    sys.exit(2)
+def generate(
+    path: Path,
+    output: Path,
+    api_key: str,
+    model: str,
+    module_name: str,
+    xcodeproj: Path | None,
+    scheme: str | None,
+    test_target_dir: Path | None,
+    max_retries: int,
+    dry_run: bool,
+    single_file: Path | None,
+    batch_size: int,
+    method_limit: int,
+    include_objc: bool,
+) -> None:
+    """Run the full pipeline: scan → analyze → generate → (validate) → report."""
+    config = PipelineConfig(
+        path=path,
+        output_dir=output,
+        module_name=module_name,
+        include_objc=include_objc,
+        batch_size=batch_size,
+        method_limit=method_limit,
+        xcodeproj=xcodeproj,
+        scheme=scheme,
+        test_target_dir=test_target_dir,
+        max_retries=max_retries,
+        dry_run=dry_run,
+        single_file=single_file,
+    )
+    output.mkdir(parents=True, exist_ok=True)
+    client = ClaudeClient(api_key=api_key, model=model)
+    report = run_pipeline(config, client)
+    md = generate_report(report)
+    (output / "REPORT.md").write_text(md)
+    click.echo(md)
+    if xcodeproj is None and not dry_run:
+        click.echo(
+            "\n(no --xcodeproj provided; tests were generated but not validated)",
+            err=True,
+        )
+
+
+# rough per-method estimate; assumes Claude Sonnet 4.x pricing & typical sizes.
+_EST_INPUT_TOKENS_PER_METHOD = 8000   # context bundle + prompt
+_EST_OUTPUT_TOKENS_PER_METHOD = 1500  # generated test code
 
 
 @main.command()
 @click.option("--path", "path", required=True, type=click.Path(exists=True, path_type=Path))
-@click.option("--api-key", envvar="ANTHROPIC_API_KEY", default=None)
-def estimate(path: Path, api_key: str | None) -> None:
-    """Cost/time estimate (not yet implemented)."""
-    click.echo("estimate: not implemented yet", err=True)
-    sys.exit(2)
+@click.option("--api-key", envvar="ANTHROPIC_API_KEY", required=True)
+@click.option("--model", default="claude-sonnet-4-5-20250929")
+@click.option("--include-objc", is_flag=True, default=False)
+@click.option("--batch-size", default=50, type=int)
+@click.option("--method-limit", default=50, type=int)
+def estimate(
+    path: Path,
+    api_key: str,
+    model: str,
+    include_objc: bool,
+    batch_size: int,
+    method_limit: int,
+) -> None:
+    """Scan + analyze + project the cost of generating tests, without generating."""
+    files = file_discovery.discover_files(path, include_objc=include_objc)
+    all_classes = []
+    for sf in files:
+        if sf.language == "swift":
+            all_classes.extend(swift_scanner.scan_file(sf))
+        else:
+            all_classes.extend(objc_scanner.scan_file(sf))
+
+    client = ClaudeClient(api_key=api_key, model=model)
+    assessments = assess_testability(all_classes, client, batch_size=batch_size)
+    testable = filter_testable(assessments)
+    ranked = apply_limit(prioritize_methods(testable, client), method_limit)
+
+    in_rate, out_rate = client.tracker.pricing.get(
+        client.tracker.model, client.tracker.pricing["default"]
+    )
+    projected_gen_cost = len(ranked) * (
+        _EST_INPUT_TOKENS_PER_METHOD * in_rate / 1_000_000
+        + _EST_OUTPUT_TOKENS_PER_METHOD * out_rate / 1_000_000
+    )
+    so_far = client.tracker.estimated_cost()
+
+    summary = {
+        "files_scanned": len(files),
+        "classes_analyzed": len(all_classes),
+        "testable_classes": len(testable),
+        "prioritized_methods": len(ranked),
+        "analysis_cost_so_far_usd": round(so_far, 6),
+        "projected_generation_cost_usd": round(projected_gen_cost, 4),
+        "projected_total_usd": round(so_far + projected_gen_cost, 4),
+        "model": model,
+    }
+    click.echo(json.dumps(summary, indent=2))
 
 
 if __name__ == "__main__":

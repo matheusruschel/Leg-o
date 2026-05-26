@@ -159,10 +159,39 @@ class ValidationResult(BaseModel):
     skipped_reason: Optional[str] = None
 
 
+ClassStatus = Literal[
+    "generated_unverified",
+    "compiled",
+    "passed",
+    "compile_failed",
+    "test_failed",
+    "generation_failed",
+    "skipped",
+]
+
+
+class ClassResult(BaseModel):
+    class_name: str
+    file_path: Optional[Path] = None
+    methods: list[str] = Field(default_factory=list)
+    status: ClassStatus = "generated_unverified"
+    retries: int = 0
+    output_path: Optional[Path] = None
+    error_summary: Optional[str] = None
+    validation: Optional[ValidationResult] = None
+
+
 class PipelineReport(BaseModel):
     files_scanned: int = 0
     classes_analyzed: int = 0
+    testable_classes: int = 0
+    classes_needing_refactor: int = 0
     tests_generated: int = 0
-    pass_rate: float = 0.0
+    first_pass_compile_rate: float = 0.0
+    final_pass_rate: float = 0.0
+    average_retries: float = 0.0
+    class_results: list[ClassResult] = Field(default_factory=list)
+    refactoring_needed: list[dict] = Field(default_factory=list)
+    top_recommendations: list[PrioritizedMethod] = Field(default_factory=list)
     token_usage: dict = Field(default_factory=dict)
     estimated_cost: float = 0.0
