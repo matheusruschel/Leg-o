@@ -246,6 +246,38 @@ def test_run_pipeline_proceeds_when_confirm_returns_true(tmp_path: Path):
     assert report.tests_generated >= 1
 
 
+def test_run_pipeline_filters_classes_when_confirm_returns_subset(tmp_path: Path):
+    # Set up a project with two classes; confirm callback returns only one of them.
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "A.swift").write_text("import Foundation\nclass A {\n  func foo() {}\n}\n")
+    (src / "B.swift").write_text("import Foundation\nclass B {\n  func bar() {}\n}\n")
+
+    client = _make_client()
+    client.call_json.side_effect = [
+        _assessment_response(["A", "B"]),
+        _prioritize_response(["A", "B"]),
+    ]
+    client.call.return_value = SAMPLE_TEST
+
+    confirm = MagicMock(return_value={"A"})  # keep only A
+    config = PipelineConfig(
+        path=src,
+        output_dir=tmp_path / "out",
+        method_limit=10,
+    )
+    report = run_pipeline(config, client, confirm_callback=confirm)
+
+    by_name = {r.class_name: r for r in report.class_results}
+    # A was generated
+    assert by_name["A"].status != "skipped"
+    # B was excluded
+    assert by_name["B"].status == "skipped"
+    assert "excluded by user" in (by_name["B"].error_summary or "")
+    # Claude was called once for generation (only for A)
+    assert client.call.call_count == 1
+
+
 def test_run_pipeline_skips_confirm_in_dry_run(tmp_path: Path):
     target_file = FIXTURES / "network_service.swift"
     client = _make_client()

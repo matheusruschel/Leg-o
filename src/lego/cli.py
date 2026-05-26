@@ -205,18 +205,22 @@ def generate(
         )
 
 
-def _interactive_confirm(plan: GenerationPlan) -> bool:
-    """Print the per-class plan + total cost, then prompt y/N."""
+def _interactive_confirm(plan: GenerationPlan):
+    """Print the per-class plan + cost, let the user exclude items, then confirm.
+
+    Returns False to abort, True to keep everything, or a set of class names to keep.
+    """
     click.echo("\n--- Generation plan ---")
     click.echo(f"Model: {plan.model}")
-    click.echo(f"Classes to generate: {len(plan.items)}")
-    for item in plan.items:
+    click.echo(f"Classes to generate: {len(plan.items)}\n")
+    for idx, item in enumerate(plan.items, start=1):
         methods = ", ".join(item.methods) if item.methods else "(no methods)"
         click.echo(
-            f"  - {item.class_name} [{len(item.methods)} method(s)]: {methods}"
+            f"  [{idx:>2}] {item.class_name} "
+            f"({len(item.methods)} method(s)): {methods}"
         )
         click.echo(
-            f"      ~{item.estimated_input_tokens} in + {item.estimated_output_tokens} out tokens, "
+            f"        ~{item.estimated_input_tokens} in + {item.estimated_output_tokens} out tokens, "
             f"~${item.estimated_cost_usd:.4f}"
         )
     click.echo("")
@@ -229,7 +233,53 @@ def _interactive_confirm(plan: GenerationPlan) -> bool:
         f"Projected total:             "
         f"${plan.analysis_cost_so_far_usd + plan.total_estimated_cost_usd:.4f}"
     )
+
+    raw = click.prompt(
+        "\nNumbers to EXCLUDE (comma-separated, e.g. '1,3'); empty to keep all",
+        default="", show_default=False,
+    )
+    excluded_indexes = _parse_exclusion_input(raw, count=len(plan.items))
+    if excluded_indexes is None:
+        click.echo("Invalid input; aborting.")
+        return False
+
+    if excluded_indexes:
+        kept_names = {
+            item.class_name for i, item in enumerate(plan.items, start=1)
+            if i not in excluded_indexes
+        }
+        if not kept_names:
+            click.echo("All items excluded; aborting.")
+            return False
+        click.echo(
+            f"\nKeeping {len(kept_names)} of {len(plan.items)} classes "
+            f"(excluding {len(excluded_indexes)})."
+        )
+        if not click.confirm("Proceed with generation?", default=False):
+            return False
+        return kept_names
+
     return click.confirm("\nProceed with generation?", default=False)
+
+
+def _parse_exclusion_input(raw: str, count: int) -> set[int] | None:
+    """Parse '1,3,5' into {1,3,5}. Return None on any parse error or out-of-range."""
+    raw = (raw or "").strip()
+    if not raw:
+        return set()
+    result: set[int] = set()
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            n = int(token)
+        except ValueError:
+            return None
+        if n < 1 or n > count:
+            return None
+        result.add(n)
+    return result
 
 
 # rough per-method estimate; assumes Claude Sonnet 4.x pricing & typical sizes.

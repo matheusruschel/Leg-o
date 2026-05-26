@@ -107,8 +107,15 @@ def run_pipeline(
     claude_client: ClaudeClient,
     compile_fn: Optional[Callable] = None,
     run_fn: Optional[Callable] = None,
-    confirm_callback: Optional[Callable[[GenerationPlan], bool]] = None,
+    confirm_callback: Optional[Callable[[GenerationPlan], "object"]] = None,
 ) -> PipelineReport:
+    """Run the lego pipeline. confirm_callback (if provided) is called once with
+    the generation plan before any generation API calls. Its return value:
+
+      - falsy / None / False  → abort, no generation
+      - True                  → proceed with the full plan (all classes)
+      - set[str] / list[str]  → proceed but only generate for these class names
+    """
     report = PipelineReport()
     try:
         files, classes = _scan(config)
@@ -147,11 +154,23 @@ def run_pipeline(
 
         if confirm_callback is not None and not config.dry_run and target_classes:
             plan = build_generation_plan(target_classes, ranked, claude_client)
-            if not confirm_callback(plan):
+            decision = confirm_callback(plan)
+            if not decision:
                 log.info("user declined generation plan; aborting before generate")
                 report.token_usage = claude_client.tracker.report()
                 report.estimated_cost = claude_client.tracker.estimated_cost()
                 return report
+            if isinstance(decision, (set, list, tuple)):
+                keep = set(decision)
+                excluded = [c.name for c in target_classes if c.name not in keep]
+                target_classes = [c for c in target_classes if c.name in keep]
+                ranked = [m for m in ranked if m.class_name in keep]
+                for name in excluded:
+                    report.class_results.append(ClassResult(
+                        class_name=name, status="skipped",
+                        error_summary="excluded by user at confirm step",
+                    ))
+                log.info("user kept %d of %d classes", len(target_classes), len(target_classes) + len(excluded))
 
         generated_results = _generate_for_classes(
             target_classes, files, assessments, ranked, config, claude_client,
