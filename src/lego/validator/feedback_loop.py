@@ -40,10 +40,16 @@ def validate_and_fix(
         )
 
     # Lazy import to keep tests fast and avoid the macOS-only path at module load.
+    destination = config.destination
     if compile_fn is None or run_fn is None:
-        from .xcodebuild import compile_test, run_test
+        from .xcodebuild import autodetect_destination, compile_test, run_test
         compile_fn = compile_fn or compile_test
         run_fn = run_fn or run_test
+        if destination == DEFAULT_DESTINATION:
+            detected = autodetect_destination()
+            if detected and detected != destination:
+                log.info("default simulator unavailable; using %s", detected)
+                destination = detected
 
     result = ValidationResult()
     current_test = generated_test
@@ -53,7 +59,7 @@ def validate_and_fix(
         compiled, compile_output = compile_fn(
             test_path, config.xcodeproj, config.scheme,
             xcworkspace=config.xcworkspace,
-            destination=config.destination,
+            destination=destination,
         )
         result.iterations.append(
             ValidationIteration(
@@ -80,7 +86,7 @@ def validate_and_fix(
             test_path, config.xcodeproj, config.scheme,
             test_class=f"{current_test.target_class}Tests",
             xcworkspace=config.xcworkspace,
-            destination=config.destination,
+            destination=destination,
         )
         result.iterations.append(
             ValidationIteration(

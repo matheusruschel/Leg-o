@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import json
+import logging
 import shutil
 import subprocess
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 
 DEFAULT_DESTINATION = "platform=iOS Simulator,name=iPhone 16"
 DEFAULT_COMPILE_TIMEOUT = 120
 DEFAULT_TEST_TIMEOUT = 180
+_PREFERRED_DEVICE_NAMES = ("iPhone 16", "iPhone 15", "iPhone 14", "iPhone")
 
 
 class XcodebuildUnavailable(RuntimeError):
@@ -21,6 +26,56 @@ def _ensure_xcodebuild() -> str:
             "xcodebuild not found on PATH; install Xcode or run on macOS"
         )
     return path
+
+
+def list_available_ios_simulators(runner=subprocess.run) -> list[dict]:
+    """Return a list of available iOS simulator device dicts from `xcrun simctl list`.
+
+    Each dict has at least 'name' and 'runtime' (the iOS version), plus simctl's own keys
+    like 'isAvailable' and 'udid'. Returns [] on any failure — caller should handle.
+    """
+    xcrun = shutil.which("xcrun")
+    if not xcrun:
+        return []
+    try:
+        proc = runner([xcrun, "simctl", "list", "devices", "available", "--json"],
+                      capture_output=True, text=True, timeout=30)
+    except (subprocess.TimeoutExpired, OSError):
+        return []
+    if proc.returncode != 0:
+        return []
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return []
+
+    devices: list[dict] = []
+    for runtime_key, entries in (data.get("devices") or {}).items():
+        if "iOS" not in runtime_key:
+            continue
+        for entry in entries:
+            if entry.get("isAvailable", True):
+                devices.append({**entry, "runtime": runtime_key})
+    return devices
+
+
+def autodetect_destination(runner=subprocess.run) -> str | None:
+    """Pick a sensible iOS simulator destination string from installed devices.
+
+    Returns DEFAULT_DESTINATION's device if available, else the first device
+    matching a preferred name (iPhone 16 → 15 → 14 → any iPhone), else None.
+    """
+    devices = list_available_ios_simulators(runner=runner)
+    if not devices:
+        return None
+    names = {d["name"] for d in devices if d.get("name")}
+    for preferred in _PREFERRED_DEVICE_NAMES:
+        match = next((n for n in names if n.startswith(preferred)), None)
+        if match:
+            return f"platform=iOS Simulator,name={match}"
+    # Fallback: just use whatever's first.
+    first = devices[0].get("name")
+    return f"platform=iOS Simulator,name={first}" if first else None
 
 
 def _project_flags(xcodeproj: Path | None, xcworkspace: Path | None) -> list[str]:
