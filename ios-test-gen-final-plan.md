@@ -34,7 +34,7 @@ swift-test-gen/
 ├── LICENSE
 ├── pyproject.toml
 ├── src/
-│   └── swift_test_gen/
+│   └── lego/
 │       ├── __init__.py
 │       ├── cli.py                    # Click CLI entry point
 │       ├── models.py                 # All Pydantic data models
@@ -190,7 +190,7 @@ Read CLAUDE.md. Initialize the swift-test-gen project:
 2. Set up pyproject.toml:
    - Dependencies: click, anthropic, pydantic, tree-sitter, tree-sitter-swift
    - Dev dependencies: pytest, pytest-cov, ruff, mypy
-   - Console script entry point: swift-test-gen = swift_test_gen.cli:main
+   - Console script entry point: lego = lego.cli:main
 3. Create models.py with ALL Pydantic models listed in CLAUDE.md
 4. Create cli.py with Click command group and these subcommands (stubs):
    - scan: --path (required), --output (optional JSON file path)
