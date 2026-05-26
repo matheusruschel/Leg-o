@@ -6,6 +6,7 @@ from lego.models import ClassMetadata
 from lego.pod_detector import (
     classes_skipped_by_pod_import,
     find_podfile_lock,
+    normalize_import,
     parse_pod_modules,
 )
 
@@ -69,6 +70,53 @@ def test_classes_skipped_by_pod_import_partitions_correctly():
     # matched sets are populated
     matched_by_name = {c.name: matched for c, matched in skipped}
     assert matched_by_name["UsesAlamofire"] == {"Alamofire"}
+
+
+def test_normalize_import_handles_swift_and_objc_forms():
+    # Swift: bare module name (passes through)
+    assert normalize_import("Alamofire") == "Alamofire"
+    # ObjC angle imports (umbrella header)
+    assert normalize_import("#import <Alamofire/Alamofire.h>") == "Alamofire"
+    assert normalize_import("#import <FBSDKCoreKit/FBSDKAppEvents.h>") == "FBSDKCoreKit"
+    # ObjC angle include
+    assert normalize_import("#include <FooKit/Bar.h>") == "FooKit"
+    # ObjC @import module syntax
+    assert normalize_import("@import Alamofire;") == "Alamofire"
+    # ObjC quoted-form import is file-local, not a module
+    assert normalize_import('#import "MyLocalHeader.h"') is None
+    # Empty / garbage
+    assert normalize_import("") is None
+
+
+def test_classes_skipped_by_pod_import_works_for_objc_import_directives():
+    objc_class = ClassMetadata(
+        name="LegacyService",
+        kind="class",
+        file_path=Path("LegacyService.m"),
+        imports=[
+            '#import "LegacyService.h"',
+            "#import <Alamofire/Alamofire.h>",
+            "#import <Foundation/Foundation.h>",
+        ],
+    )
+    swift_class = ClassMetadata(
+        name="ModernService",
+        kind="class",
+        file_path=Path("ModernService.swift"),
+        imports=["Foundation", "Alamofire"],
+    )
+    clean_class = ClassMetadata(
+        name="Clean",
+        kind="class",
+        file_path=Path("Clean.swift"),
+        imports=["Foundation"],
+    )
+    kept, skipped = classes_skipped_by_pod_import(
+        [objc_class, swift_class, clean_class],
+        pod_modules={"Alamofire"},
+    )
+    assert [c.name for c in kept] == ["Clean"]
+    assert {c.name for c, _ in skipped} == {"LegacyService", "ModernService"}
 
 
 def test_classes_skipped_by_pod_import_noop_when_no_pods():

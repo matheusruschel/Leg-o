@@ -39,6 +39,33 @@ def parse_pod_modules(podfile_lock: Path) -> set[str]:
     return pods
 
 
+_OBJC_ANGLE_IMPORT_RE = re.compile(r"#\s*(?:import|include)\s*<([A-Za-z0-9_]+)\s*/")
+_OBJC_MODULE_IMPORT_RE = re.compile(r"@\s*import\s+([A-Za-z0-9_]+)")
+
+
+def normalize_import(token: str) -> str | None:
+    """Return the module name from a raw scanner-extracted import token.
+
+    Swift scanner stores bare module names ("Alamofire"); ObjC stores the full
+    directive ("#import <Alamofire/Alamofire.h>" or "@import Alamofire;").
+    Quoted-string ObjC imports ("Foo.h") are file-local — they return None.
+    """
+    token = token.strip()
+    if not token:
+        return None
+    m = _OBJC_ANGLE_IMPORT_RE.match(token)
+    if m:
+        return m.group(1)
+    m = _OBJC_MODULE_IMPORT_RE.match(token)
+    if m:
+        return m.group(1)
+    if token.startswith("#") or token.startswith("@import"):
+        # Quoted-form #import "Foo.h" or anything else we don't recognize.
+        return None
+    # Already a bare module name (Swift case).
+    return token
+
+
 def classes_skipped_by_pod_import(
     classes: list[ClassMetadata],
     pod_modules: set[str],
@@ -50,7 +77,8 @@ def classes_skipped_by_pod_import(
     kept: list[ClassMetadata] = []
     skipped: list[tuple[ClassMetadata, set[str]]] = []
     for c in classes:
-        matched = set(c.imports) & pod_modules
+        modules = {m for m in (normalize_import(t) for t in c.imports) if m}
+        matched = modules & pod_modules
         if matched:
             skipped.append((c, matched))
         else:
