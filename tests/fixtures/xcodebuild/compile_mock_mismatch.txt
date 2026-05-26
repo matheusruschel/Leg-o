@@ -1,0 +1,7 @@
+/Users/dev/proj/Tests/NetworkServiceTests.swift:55:11: error: type 'MockURLSession' does not conform to protocol 'URLSessionProtocol'
+class MockURLSession: URLSessionProtocol {
+          ^
+/Users/dev/proj/Tests/NetworkServiceTests.swift:42:9: error: cannot convert value of type 'String' to expected argument type 'Int'
+        sut.fetchUser(id: "abc")
+        ^
+** BUILD FAILED **

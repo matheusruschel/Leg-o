@@ -1,0 +1,4 @@
+Test Case '-[MyAppTests.NetworkServiceTests test_fetchUser_nilSession_crashes]' started.
+Fatal error: Unexpectedly found nil while unwrapping an Optional value
+Test Case '-[MyAppTests.NetworkServiceTests test_fetchUser_nilSession_crashes]' failed with EXC_BAD_INSTRUCTION
+** TEST FAILED **

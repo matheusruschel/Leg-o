@@ -1,0 +1,3 @@
+Build description signature: abc123
+Build description path: /Users/dev/Library/Developer/Xcode/DerivedData/...
+** BUILD SUCCEEDED **

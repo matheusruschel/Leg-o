@@ -1,0 +1,5 @@
+Test Suite 'NetworkServiceTests' started.
+Test Case '-[MyAppTests.NetworkServiceTests test_fetchUser_validId_returnsUser]' started.
+/Users/dev/proj/Tests/NetworkServiceTests.swift:42: error: -[MyAppTests.NetworkServiceTests test_fetchUser_validId_returnsUser] : XCTAssertEqual failed: ("Optional(0)") is not equal to ("Optional(1)")
+Test Case '-[MyAppTests.NetworkServiceTests test_fetchUser_validId_returnsUser]' failed (0.012 seconds).
+** TEST FAILED **

@@ -120,11 +120,43 @@ class GeneratedTest(BaseModel):
     output_path: Optional[Path] = None
 
 
+ErrorCategory = Literal[
+    "missing_import",
+    "type_mismatch",
+    "access_control",
+    "mock_mismatch",
+    "async_issue",
+    "runtime_crash",
+    "test_failure",
+    "other",
+]
+
+
+class ParsedError(BaseModel):
+    category: ErrorCategory = "other"
+    file: Optional[str] = None
+    line: Optional[int] = None
+    column: Optional[int] = None
+    message: str = ""
+    symbol: Optional[str] = None
+    test_name: Optional[str] = None
+    severity: Optional[str] = None
+
+
+class ValidationIteration(BaseModel):
+    step: Literal["compile", "test"]
+    success: bool
+    errors: list[ParsedError] = Field(default_factory=list)
+    raw_output: str = ""
+
+
 class ValidationResult(BaseModel):
     compiled: bool = False
     passed: bool = False
-    errors: list[str] = Field(default_factory=list)
     retry_count: int = 0
+    iterations: list[ValidationIteration] = Field(default_factory=list)
+    skipped: bool = False
+    skipped_reason: Optional[str] = None
 
 
 class PipelineReport(BaseModel):

@@ -1,0 +1,8 @@
+Building for testing...
+/Users/dev/proj/Tests/NetworkServiceTests.swift:3:8: error: no such module 'MyApp'
+@testable import MyApp
+       ^
+/Users/dev/proj/Tests/NetworkServiceTests.swift:18:21: error: cannot find type 'User' in scope
+        let user: User? = nil
+                    ^
+** BUILD FAILED **
