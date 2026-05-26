@@ -30,6 +30,7 @@ from .pod_detector import (
 )
 from .scanner import file_discovery, objc_scanner, swift_scanner
 from .validator.feedback_loop import FeedbackLoopConfig, validate_and_fix
+from .xcode_project import XcodeProjectError, add_files_to_target
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +57,9 @@ class PipelineConfig:
     test_target_dir: Optional[Path] = None
     max_retries: int = 3
     destination: Optional[str] = None  # None → use FeedbackLoopConfig default
+    # Auto-add generated files to an xcodeproj target (writes project.pbxproj)
+    test_target_name: Optional[str] = None
+    add_to_target_xcodeproj: Optional[Path] = None
     # Modes
     dry_run: bool = False
     single_file: Optional[Path] = None
@@ -267,6 +271,15 @@ def _generate_for_classes(
             continue
 
         output_path = write_test_file(generated, config.output_dir)
+        if config.add_to_target_xcodeproj and config.test_target_name:
+            try:
+                add_files_to_target(
+                    config.add_to_target_xcodeproj,
+                    config.test_target_name,
+                    [output_path],
+                )
+            except XcodeProjectError as e:
+                log.warning("could not add %s to target: %s", output_path, e)
         result = ClassResult(
             class_name=meta.name, methods=methods, status="generated_unverified",
             output_path=output_path,

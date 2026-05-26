@@ -109,6 +109,9 @@ def analyze(
               help="Path to .xcworkspace (required for CocoaPods/SPM-workspace projects).")
 @click.option("--scheme", default=None)
 @click.option("--test-target-dir", type=click.Path(path_type=Path), default=None)
+@click.option("--test-target", "test_target_name", default=None,
+              help="Xcode target name to auto-add generated files to (e.g., WSLTests). "
+                   "Requires --xcodeproj (or derives one next to --xcworkspace).")
 @click.option("--destination", default=None,
               help="xcodebuild -destination string. Default: 'platform=iOS Simulator,name=iPhone 16'. "
                    "Check `xcrun simctl list devices available` for installed simulators.")
@@ -136,6 +139,7 @@ def generate(
     xcworkspace: Path | None,
     scheme: str | None,
     test_target_dir: Path | None,
+    test_target_name: str | None,
     destination: str | None,
     max_retries: int,
     dry_run: bool,
@@ -153,6 +157,20 @@ def generate(
         if detected is not None:
             click.echo(f"(auto-detected sibling workspace: {detected}; using -workspace)", err=True)
             xcworkspace = detected
+
+    # If user asked us to add files to a target, we need an xcodeproj path.
+    # Derive one from the workspace if they didn't pass it.
+    add_to_xcodeproj: Path | None = None
+    if test_target_name is not None:
+        add_to_xcodeproj = xcodeproj
+        if add_to_xcodeproj is None and xcworkspace is not None:
+            candidate = xcworkspace.with_suffix(".xcodeproj")
+            if candidate.exists():
+                add_to_xcodeproj = candidate
+        if add_to_xcodeproj is None:
+            raise click.UsageError(
+                "--test-target requires --xcodeproj (or a workspace with a sibling .xcodeproj)"
+            )
     config = PipelineConfig(
         path=path,
         output_dir=output,
@@ -164,6 +182,8 @@ def generate(
         xcworkspace=xcworkspace,
         scheme=scheme,
         test_target_dir=test_target_dir,
+        test_target_name=test_target_name,
+        add_to_target_xcodeproj=add_to_xcodeproj,
         destination=destination,
         max_retries=max_retries,
         dry_run=dry_run,

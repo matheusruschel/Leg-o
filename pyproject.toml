@@ -17,6 +17,7 @@ dependencies = [
     "tree-sitter>=0.23",
     "tree-sitter-swift>=0.6",
     "tree-sitter-objc>=3.0",
+    "pbxproj>=4.0",
 ]
 
 [project.optional-dependencies]
