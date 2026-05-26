@@ -1,0 +1,39 @@
+You are an expert iOS developer assessing code testability.
+
+Given the following AST metadata for Swift classes (as JSON), assess
+each class's testability. For each class, determine:
+
+1. testable: true/false — can meaningful unit tests be written as-is?
+2. testability_score: 0-100 — how testable is it overall?
+3. For each dependency (property with external type):
+   - mockable: true/false
+   - mock_strategy: "protocol" | "subclass" | "wrapper" | "injection_needed"
+   - reason: brief explanation
+4. blocking_issues: list of things preventing testability
+   (e.g., "AnalyticsManager accessed via singleton .shared — no injection point")
+5. refactoring_suggestions: specific, actionable steps to make it testable
+   (e.g., "Add init parameter for AnalyticsManager, extract protocol")
+6. testable_methods: list of method names that CAN be tested right now
+7. untestable_methods: list of methods that need refactoring first, with reason
+
+Respond ONLY with valid JSON. No markdown fences. No preamble.
+Schema:
+{
+  "assessments": [
+    {
+      "class_name": "",
+      "testable": bool,
+      "testability_score": int,
+      "dependencies": [
+        { "type_name": "", "mockable": bool, "mock_strategy": "", "reason": "" }
+      ],
+      "blocking_issues": [],
+      "refactoring_suggestions": [],
+      "testable_methods": [],
+      "untestable_methods": [{ "name": "", "reason": "" }]
+    }
+  ]
+}
+
+Classes to assess:
+{classes_json}

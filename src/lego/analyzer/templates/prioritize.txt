@@ -1,0 +1,26 @@
+You are an expert iOS developer deciding which methods to test first.
+
+Given the following testable classes and their methods (as JSON),
+rank the methods by test priority. Consider:
+- Business logic density (data transformations, validations, calculations
+  rank highest)
+- Error handling paths (methods with multiple failure modes)
+- Side effects (methods that change state, call external services)
+- Complexity (methods with many branches/conditions)
+- Skip trivial code: simple getters, setters, one-line passthroughs,
+  deinit, basic init with no logic
+
+Return a JSON array of methods in priority order:
+[
+  {
+    "class_name": "",
+    "method_name": "",
+    "priority_score": 1-100,
+    "reason": "brief explanation",
+    "suggested_test_cases": ["happy path", "nil input"]
+  }
+]
+Top 50 methods max. Respond ONLY with valid JSON.
+
+Testable classes:
+{classes_json}

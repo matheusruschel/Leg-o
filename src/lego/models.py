@@ -73,17 +73,35 @@ class ClassMetadata(BaseModel):
     line_end: int = 0
 
 
+MockStrategy = Literal["protocol", "subclass", "wrapper", "injection_needed", "none"]
+
+
+class DependencyAssessment(BaseModel):
+    type_name: str
+    mockable: bool = False
+    mock_strategy: MockStrategy = "none"
+    reason: Optional[str] = None
+
+
 class TestabilityResult(BaseModel):
+    __test__ = False  # not a pytest test class despite the "Test" prefix
+
     class_name: str
     testable: bool
     testability_score: int = 0
-    mockable_deps: list[DependencyInfo] = Field(default_factory=list)
-    unmockable_deps: list[DependencyInfo] = Field(default_factory=list)
+    dependencies: list[DependencyAssessment] = Field(default_factory=list)
     blocking_issues: list[str] = Field(default_factory=list)
     refactoring_suggestions: list[str] = Field(default_factory=list)
     testable_methods: list[str] = Field(default_factory=list)
     untestable_methods: list[dict] = Field(default_factory=list)
+
+
+class PrioritizedMethod(BaseModel):
+    class_name: str
+    method_name: str
     priority_score: int = 0
+    reason: Optional[str] = None
+    suggested_test_cases: list[str] = Field(default_factory=list)
 
 
 class GeneratedTest(BaseModel):
