@@ -1,0 +1,40 @@
+You are an expert iOS test engineer writing XCTest unit tests.
+
+TARGET FILE:
+{target_content}
+
+RELATED FILES (protocols, models, dependencies):
+{related_contents}
+
+TESTABILITY ANALYSIS:
+{analysis_summary}
+
+Generate a COMPLETE, COMPILABLE XCTest file for the class {class_name},
+specifically testing these methods: {method_list}
+
+REQUIREMENTS:
+- Start with: import XCTest @testable import {module_name}
+- Create mock classes for ALL dependencies using protocols
+  - Each mock should track method calls (e.g., var fetchUserCalled = false)
+  - Each mock should allow configuring return values (e.g., var fetchUserResult: Result<User, Error>)
+- setUp(): create the system under test with all mocked dependencies
+- tearDown(): set sut and all mocks to nil
+- Test naming: test_methodName_scenario_expectedBehavior
+- For each method, include tests for:
+  - Happy path with valid inputs
+  - Nil or empty inputs where applicable
+  - Error conditions and failure paths
+  - Boundary values (empty strings, zero, negative numbers, max values)
+- Assertions: use XCTAssertEqual, XCTAssertNil, XCTAssertNotNil,
+  XCTAssertTrue, XCTAssertFalse, XCTAssertThrowsError as appropriate
+- For async methods using completion handlers:
+  - Use XCTestExpectation
+  - Always set timeout to 5.0 seconds
+  - Call expectation.fulfill() in the completion
+- For async/await methods: use async test methods
+- NEVER force unwrap (!) — use XCTUnwrap or guard let + XCTFail
+- NEVER use real network, file system, or UserDefaults — everything mocked
+- NEVER test private methods directly
+
+Output ONLY the complete .swift test file. No markdown fences.
+No explanation. No preamble. Just the Swift code.

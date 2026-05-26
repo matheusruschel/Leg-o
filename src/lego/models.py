@@ -104,6 +104,14 @@ class PrioritizedMethod(BaseModel):
     suggested_test_cases: list[str] = Field(default_factory=list)
 
 
+class ContextBundle(BaseModel):
+    target_file: Path
+    target_class: str
+    target_content: str
+    related_contents: dict[str, str] = Field(default_factory=dict)
+    analysis_summary: str = ""
+
+
 class GeneratedTest(BaseModel):
     file_content: str
     target_class: str

@@ -1,0 +1,23 @@
+The following XCTest file failed to compile or run. Fix the errors.
+
+ORIGINAL TEST FILE:
+{test_content}
+
+BUILD/TEST ERRORS:
+{error_output}
+
+ORIGINAL SOURCE FILE (for reference):
+{source_content}
+
+Common issues to check:
+- Missing imports
+- Mock method signatures don't match the protocol
+- Wrong assertion types (XCTAssertEqual needs Equatable conformance)
+- Accessing private members
+- Missing @objc for Objective-C protocol methods
+- XCTestExpectation not fulfilled (async timing issues)
+- Main thread assertions for UI code (use DispatchQueue.main in test)
+- Force unwraps that crash on nil
+
+Return ONLY the complete corrected .swift file. No markdown fences.
+No explanation. Just the Swift code.
