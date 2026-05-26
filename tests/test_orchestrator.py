@@ -6,8 +6,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from lego.llm.token_tracker import TokenTracker
-from lego.orchestrator import PipelineConfig, run_pipeline
+from lego.orchestrator import PipelineConfig, build_generation_plan, run_pipeline
 from lego.reporter import generate_report
+from lego.scanner import file_discovery, swift_scanner
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -184,6 +185,81 @@ def test_run_pipeline_skips_classes_importing_pod_modules(tmp_path: Path):
     # The clean class still went through generation
     assert "Clean" in by_name
     assert by_name["Clean"].status != "skipped"
+
+
+def test_build_generation_plan_computes_per_class_cost():
+    # Load real ClassMetadata from a fixture so methods are populated.
+    files = file_discovery.discover_files(FIXTURES)
+    network = [c for sf in files if sf.path.name == "network_service.swift"
+               for c in swift_scanner.scan_file(sf)]
+    assert network, "fixture should produce at least one class"
+
+    client = _make_client()  # tracker defaults to "default" pricing 3/15
+    ranked = []  # no prioritized methods → fall back to all class methods
+    plan = build_generation_plan(network, ranked, client)
+
+    assert len(plan.items) == len(network)
+    for item in plan.items:
+        assert item.estimated_input_tokens > 0
+        assert item.estimated_output_tokens > 0
+        assert item.estimated_cost_usd > 0
+    assert plan.total_estimated_cost_usd == pytest.approx(
+        sum(i.estimated_cost_usd for i in plan.items), abs=1e-4
+    )
+
+
+def test_run_pipeline_aborts_when_confirm_returns_false(tmp_path: Path):
+    target_file = FIXTURES / "network_service.swift"
+    client = _make_client()
+    client.call.return_value = SAMPLE_TEST
+
+    config = PipelineConfig(
+        path=FIXTURES,
+        output_dir=tmp_path / "out",
+        single_file=target_file,
+    )
+    confirm = MagicMock(return_value=False)
+    report = run_pipeline(config, client, confirm_callback=confirm)
+
+    confirm.assert_called_once()
+    # No generation API calls should have happened
+    client.call.assert_not_called()
+    # No generated class results recorded
+    assert report.tests_generated == 0
+
+
+def test_run_pipeline_proceeds_when_confirm_returns_true(tmp_path: Path):
+    target_file = FIXTURES / "network_service.swift"
+    client = _make_client()
+    client.call.return_value = SAMPLE_TEST
+
+    config = PipelineConfig(
+        path=FIXTURES,
+        output_dir=tmp_path / "out",
+        single_file=target_file,
+    )
+    confirm = MagicMock(return_value=True)
+    report = run_pipeline(config, client, confirm_callback=confirm)
+
+    confirm.assert_called_once()
+    client.call.assert_called()
+    assert report.tests_generated >= 1
+
+
+def test_run_pipeline_skips_confirm_in_dry_run(tmp_path: Path):
+    target_file = FIXTURES / "network_service.swift"
+    client = _make_client()
+
+    config = PipelineConfig(
+        path=FIXTURES,
+        output_dir=tmp_path / "out",
+        single_file=target_file,
+        dry_run=True,
+    )
+    confirm = MagicMock(return_value=True)
+    run_pipeline(config, client, confirm_callback=confirm)
+
+    confirm.assert_not_called()  # dry-run skips the confirm gate
 
 
 def test_generate_report_renders_markdown_sections(tmp_path: Path):

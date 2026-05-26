@@ -17,6 +17,8 @@ from .llm.client import ClaudeClient
 from .models import (
     ClassMetadata,
     ClassResult,
+    GenerationPlan,
+    GenerationPlanItem,
     PipelineReport,
     PrioritizedMethod,
     SwiftFile,
@@ -31,6 +33,13 @@ from .scanner import file_discovery, objc_scanner, swift_scanner
 from .validator.feedback_loop import FeedbackLoopConfig, validate_and_fix
 
 log = logging.getLogger(__name__)
+
+
+# Rough heuristics for the pre-flight cost estimate. Input is context-dominated
+# (full target file + related files, capped at MAX_CONTEXT_CHARS), so it doesn't
+# scale much with method count. Output does scale with the number of generated tests.
+_EST_INPUT_TOKENS_PER_CLASS = 10_000
+_EST_OUTPUT_TOKENS_PER_METHOD = 1_500
 
 
 @dataclass
@@ -56,11 +65,46 @@ class PipelineConfig:
     extra_skip_modules: list[str] = field(default_factory=list)
 
 
+def build_generation_plan(
+    target_classes: list[ClassMetadata],
+    ranked: list[PrioritizedMethod],
+    claude_client: ClaudeClient,
+) -> GenerationPlan:
+    """Project per-class token usage + cost for the upcoming generation step."""
+    tracker = claude_client.tracker
+    in_rate, out_rate = tracker.pricing.get(tracker.model, tracker.pricing["default"])
+
+    items: list[GenerationPlanItem] = []
+    for meta in target_classes:
+        methods = _methods_for_class(meta.name, ranked) or [m.name for m in meta.methods]
+        in_tok = _EST_INPUT_TOKENS_PER_CLASS
+        out_tok = max(1, len(methods)) * _EST_OUTPUT_TOKENS_PER_METHOD
+        cost = in_tok * in_rate / 1_000_000 + out_tok * out_rate / 1_000_000
+        items.append(GenerationPlanItem(
+            class_name=meta.name,
+            file_path=meta.file_path,
+            methods=methods,
+            estimated_input_tokens=in_tok,
+            estimated_output_tokens=out_tok,
+            estimated_cost_usd=round(cost, 4),
+        ))
+
+    return GenerationPlan(
+        items=items,
+        total_input_tokens=sum(i.estimated_input_tokens for i in items),
+        total_output_tokens=sum(i.estimated_output_tokens for i in items),
+        total_estimated_cost_usd=round(sum(i.estimated_cost_usd for i in items), 4),
+        analysis_cost_so_far_usd=round(tracker.estimated_cost(), 6),
+        model=tracker.model,
+    )
+
+
 def run_pipeline(
     config: PipelineConfig,
     claude_client: ClaudeClient,
     compile_fn: Optional[Callable] = None,
     run_fn: Optional[Callable] = None,
+    confirm_callback: Optional[Callable[[GenerationPlan], bool]] = None,
 ) -> PipelineReport:
     report = PipelineReport()
     try:
@@ -97,6 +141,14 @@ def run_pipeline(
             log.info("%d testable, %d methods prioritized", len(testable), len(ranked))
             report.refactoring_needed = _refactor_summary(assessments, testable)
             target_classes = _group_by_class(classes, ranked)
+
+        if confirm_callback is not None and not config.dry_run and target_classes:
+            plan = build_generation_plan(target_classes, ranked, claude_client)
+            if not confirm_callback(plan):
+                log.info("user declined generation plan; aborting before generate")
+                report.token_usage = claude_client.tracker.report()
+                report.estimated_cost = claude_client.tracker.estimated_cost()
+                return report
 
         generated_results = _generate_for_classes(
             target_classes, files, assessments, ranked, config, claude_client,

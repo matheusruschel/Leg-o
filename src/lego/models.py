@@ -181,6 +181,24 @@ class ClassResult(BaseModel):
     validation: Optional[ValidationResult] = None
 
 
+class GenerationPlanItem(BaseModel):
+    class_name: str
+    file_path: Optional[Path] = None
+    methods: list[str] = Field(default_factory=list)
+    estimated_input_tokens: int = 0
+    estimated_output_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+
+
+class GenerationPlan(BaseModel):
+    items: list[GenerationPlanItem] = Field(default_factory=list)
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_estimated_cost_usd: float = 0.0
+    analysis_cost_so_far_usd: float = 0.0
+    model: str = ""
+
+
 class PipelineReport(BaseModel):
     files_scanned: int = 0
     classes_analyzed: int = 0

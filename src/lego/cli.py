@@ -10,6 +10,7 @@ from .scanner import file_discovery, swift_scanner, objc_scanner
 from .analyzer import assess_testability, filter_testable, prioritize_methods, apply_limit
 from .llm import ClaudeClient
 from .orchestrator import PipelineConfig, autodetect_workspace, run_pipeline
+from .models import GenerationPlan
 from .reporter import generate_report
 
 
@@ -122,6 +123,8 @@ def analyze(
               help="Don't auto-skip classes that import CocoaPods modules.")
 @click.option("--skip-module", "skip_modules", multiple=True,
               help="Additional module name(s) to treat as un-mockable; classes importing these are skipped.")
+@click.option("--yes", "-y", is_flag=True, default=False,
+              help="Skip the pre-generation confirm prompt (for CI / scripting).")
 def generate(
     path: Path,
     output: Path,
@@ -141,6 +144,7 @@ def generate(
     include_objc: bool,
     no_skip_pods: bool,
     skip_modules: tuple[str, ...],
+    yes: bool,
 ) -> None:
     """Run the full pipeline: scan → analyze → generate → (validate) → report."""
     if xcworkspace is None and xcodeproj is not None:
@@ -168,7 +172,8 @@ def generate(
     )
     output.mkdir(parents=True, exist_ok=True)
     client = ClaudeClient(api_key=api_key, model=model)
-    report = run_pipeline(config, client)
+    confirm = None if yes or dry_run else _interactive_confirm
+    report = run_pipeline(config, client, confirm_callback=confirm)
     md = generate_report(report)
     (output / "REPORT.md").write_text(md)
     click.echo(md)
@@ -177,6 +182,33 @@ def generate(
             "\n(no --xcodeproj provided; tests were generated but not validated)",
             err=True,
         )
+
+
+def _interactive_confirm(plan: GenerationPlan) -> bool:
+    """Print the per-class plan + total cost, then prompt y/N."""
+    click.echo("\n--- Generation plan ---")
+    click.echo(f"Model: {plan.model}")
+    click.echo(f"Classes to generate: {len(plan.items)}")
+    for item in plan.items:
+        methods = ", ".join(item.methods) if item.methods else "(no methods)"
+        click.echo(
+            f"  - {item.class_name} [{len(item.methods)} method(s)]: {methods}"
+        )
+        click.echo(
+            f"      ~{item.estimated_input_tokens} in + {item.estimated_output_tokens} out tokens, "
+            f"~${item.estimated_cost_usd:.4f}"
+        )
+    click.echo("")
+    click.echo(
+        f"Totals: ~{plan.total_input_tokens} input + {plan.total_output_tokens} output tokens"
+    )
+    click.echo(f"Analysis cost already spent: ${plan.analysis_cost_so_far_usd:.4f}")
+    click.echo(f"Projected generation cost:   ${plan.total_estimated_cost_usd:.4f}")
+    click.echo(
+        f"Projected total:             "
+        f"${plan.analysis_cost_so_far_usd + plan.total_estimated_cost_usd:.4f}"
+    )
+    return click.confirm("\nProceed with generation?", default=False)
 
 
 # rough per-method estimate; assumes Claude Sonnet 4.x pricing & typical sizes.
