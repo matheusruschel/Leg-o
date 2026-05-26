@@ -122,6 +122,27 @@ def test_validate_and_fix_passes_workspace_to_xcodebuild(tmp_path: Path):
     assert args[1] is None  # xcodeproj positional arg
 
 
+def test_validate_and_fix_passes_destination_to_xcodebuild(tmp_path: Path):
+    config = FeedbackLoopConfig(
+        xcodeproj=tmp_path / "App.xcodeproj",
+        scheme="App",
+        test_target_dir=tmp_path,
+        max_retries=1,
+        destination="platform=iOS Simulator,name=iPhone 15",
+    )
+    compile_fn = MagicMock(return_value=(True, "** BUILD SUCCEEDED **"))
+    run_fn = MagicMock(return_value=(True, "** TEST SUCCEEDED **"))
+
+    validate_and_fix(
+        _generated(), "// src", config,
+        claude_client=MagicMock(),
+        compile_fn=compile_fn, run_fn=run_fn,
+    )
+
+    assert compile_fn.call_args.kwargs["destination"] == "platform=iOS Simulator,name=iPhone 15"
+    assert run_fn.call_args.kwargs["destination"] == "platform=iOS Simulator,name=iPhone 15"
+
+
 def test_validate_and_fix_gives_up_after_max_retries(tmp_path: Path):
     config = FeedbackLoopConfig(
         xcodeproj=tmp_path / "App.xcodeproj",

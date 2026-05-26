@@ -47,6 +47,7 @@ class PipelineConfig:
     scheme: Optional[str] = None
     test_target_dir: Optional[Path] = None
     max_retries: int = 3
+    destination: Optional[str] = None  # None → use FeedbackLoopConfig default
     # Modes
     dry_run: bool = False
     single_file: Optional[Path] = None
@@ -225,13 +226,16 @@ def _generate_for_classes(
         source_file = by_file_path.get(meta.file_path)
         source_content = source_file.content if source_file else ""
 
-        loop_config = FeedbackLoopConfig(
+        loop_kwargs = dict(
             xcodeproj=config.xcodeproj,
             xcworkspace=config.xcworkspace,
             scheme=config.scheme,
             test_target_dir=config.test_target_dir or config.output_dir,
             max_retries=config.max_retries,
         )
+        if config.destination is not None:
+            loop_kwargs["destination"] = config.destination
+        loop_config = FeedbackLoopConfig(**loop_kwargs)
         validation = validate_and_fix(
             generated, source_content, loop_config, claude_client,
             compile_fn=compile_fn, run_fn=run_fn,

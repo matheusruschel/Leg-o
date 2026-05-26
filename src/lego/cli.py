@@ -107,6 +107,9 @@ def analyze(
               help="Path to .xcworkspace (required for CocoaPods/SPM-workspace projects).")
 @click.option("--scheme", default=None)
 @click.option("--test-target-dir", type=click.Path(path_type=Path), default=None)
+@click.option("--destination", default=None,
+              help="xcodebuild -destination string. Default: 'platform=iOS Simulator,name=iPhone 16'. "
+                   "Check `xcrun simctl list devices available` for installed simulators.")
 @click.option("--max-retries", default=3, type=int)
 @click.option("--dry-run", is_flag=True, default=False,
               help="Run scan + analyze; skip API generation calls.")
@@ -129,6 +132,7 @@ def generate(
     xcworkspace: Path | None,
     scheme: str | None,
     test_target_dir: Path | None,
+    destination: str | None,
     max_retries: int,
     dry_run: bool,
     single_file: Path | None,
@@ -155,6 +159,7 @@ def generate(
         xcworkspace=xcworkspace,
         scheme=scheme,
         test_target_dir=test_target_dir,
+        destination=destination,
         max_retries=max_retries,
         dry_run=dry_run,
         single_file=single_file,

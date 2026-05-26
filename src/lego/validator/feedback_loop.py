@@ -9,6 +9,7 @@ from ..generator.test_generator import fix_tests, write_test_file
 from ..llm.client import ClaudeClient
 from ..models import GeneratedTest, ParsedError, ValidationIteration, ValidationResult
 from . import error_parser
+from .xcodebuild import DEFAULT_DESTINATION
 
 log = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ class FeedbackLoopConfig:
     scheme: Optional[str] = None
     test_target_dir: Optional[Path] = None
     max_retries: int = 3
+    destination: str = DEFAULT_DESTINATION
 
 
 def validate_and_fix(
@@ -51,6 +53,7 @@ def validate_and_fix(
         compiled, compile_output = compile_fn(
             test_path, config.xcodeproj, config.scheme,
             xcworkspace=config.xcworkspace,
+            destination=config.destination,
         )
         result.iterations.append(
             ValidationIteration(
@@ -77,6 +80,7 @@ def validate_and_fix(
             test_path, config.xcodeproj, config.scheme,
             test_class=f"{current_test.target_class}Tests",
             xcworkspace=config.xcworkspace,
+            destination=config.destination,
         )
         result.iterations.append(
             ValidationIteration(
