@@ -22,6 +22,11 @@ from .models import (
     SwiftFile,
     TestabilityResult,
 )
+from .pod_detector import (
+    classes_skipped_by_pod_import,
+    find_podfile_lock,
+    parse_pod_modules,
+)
 from .scanner import file_discovery, objc_scanner, swift_scanner
 from .validator.feedback_loop import FeedbackLoopConfig, validate_and_fix
 
@@ -44,6 +49,9 @@ class PipelineConfig:
     # Modes
     dry_run: bool = False
     single_file: Optional[Path] = None
+    # Pod handling
+    skip_pod_dependent: bool = True
+    extra_skip_modules: list[str] = field(default_factory=list)
 
 
 def run_pipeline(
@@ -56,8 +64,21 @@ def run_pipeline(
     try:
         files, classes = _scan(config)
         report.files_scanned = len(files)
+
+        pod_modules = _resolve_pod_modules(config)
+        if pod_modules:
+            classes, skipped = classes_skipped_by_pod_import(classes, pod_modules)
+            for c, matched in skipped:
+                report.class_results.append(ClassResult(
+                    class_name=c.name,
+                    file_path=c.file_path,
+                    status="skipped",
+                    error_summary=f"depends on pod module(s): {', '.join(sorted(matched))}",
+                ))
+            log.info("skipped %d classes that import pod modules", len(skipped))
+
         report.classes_analyzed = len(classes)
-        log.info("scanned %d files, found %d classes", len(files), len(classes))
+        log.info("scanned %d files, %d classes after pod filter", len(files), len(classes))
 
         if config.single_file is not None:
             target_classes = _classes_in_file(classes, config.single_file)
@@ -75,12 +96,14 @@ def run_pipeline(
             report.refactoring_needed = _refactor_summary(assessments, testable)
             target_classes = _group_by_class(classes, ranked)
 
-        report.class_results = _generate_for_classes(
+        generated_results = _generate_for_classes(
             target_classes, files, assessments, ranked, config, claude_client,
             compile_fn=compile_fn, run_fn=run_fn,
         )
+        report.class_results.extend(generated_results)
         report.tests_generated = sum(
-            1 for r in report.class_results if r.status != "generation_failed"
+            1 for r in generated_results
+            if r.status not in {"generation_failed", "skipped"}
         )
         _compute_rates(report)
     except KeyboardInterrupt:
@@ -89,6 +112,16 @@ def run_pipeline(
     report.token_usage = claude_client.tracker.report()
     report.estimated_cost = claude_client.tracker.estimated_cost()
     return report
+
+
+def _resolve_pod_modules(config: PipelineConfig) -> set[str]:
+    pods: set[str] = set(config.extra_skip_modules or [])
+    if config.skip_pod_dependent:
+        lockfile = find_podfile_lock(config.path)
+        if lockfile is not None:
+            pods.update(parse_pod_modules(lockfile))
+            log.info("loaded %d pod modules from %s", len(pods), lockfile)
+    return pods
 
 
 def _scan(config: PipelineConfig) -> tuple[list[SwiftFile], list[ClassMetadata]]:

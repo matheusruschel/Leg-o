@@ -112,6 +112,10 @@ def analyze(
 @click.option("--batch-size", default=50, type=int)
 @click.option("--method-limit", default=50, type=int)
 @click.option("--include-objc", is_flag=True, default=False)
+@click.option("--no-skip-pods", is_flag=True, default=False,
+              help="Don't auto-skip classes that import CocoaPods modules.")
+@click.option("--skip-module", "skip_modules", multiple=True,
+              help="Additional module name(s) to treat as un-mockable; classes importing these are skipped.")
 def generate(
     path: Path,
     output: Path,
@@ -127,6 +131,8 @@ def generate(
     batch_size: int,
     method_limit: int,
     include_objc: bool,
+    no_skip_pods: bool,
+    skip_modules: tuple[str, ...],
 ) -> None:
     """Run the full pipeline: scan → analyze → generate → (validate) → report."""
     config = PipelineConfig(
@@ -142,6 +148,8 @@ def generate(
         max_retries=max_retries,
         dry_run=dry_run,
         single_file=single_file,
+        skip_pod_dependent=not no_skip_pods,
+        extra_skip_modules=list(skip_modules),
     )
     output.mkdir(parents=True, exist_ok=True)
     client = ClaudeClient(api_key=api_key, model=model)

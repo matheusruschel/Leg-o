@@ -147,6 +147,45 @@ def test_run_pipeline_invokes_validation_when_configured(tmp_path: Path):
     assert all(r.status == "passed" for r in report.class_results)
 
 
+def test_run_pipeline_skips_classes_importing_pod_modules(tmp_path: Path):
+    # Lay out a tiny project: two Swift files, one imports a pod module from the lockfile.
+    project = tmp_path / "proj"
+    src = project / "Sources"
+    src.mkdir(parents=True)
+    (project / "Podfile.lock").write_text(
+        "PODS:\n  - Alamofire (5.10.0)\n  - AppAuth (1.7.5)\n"
+    )
+    (src / "UsesPod.swift").write_text(
+        "import Foundation\nimport Alamofire\nclass UsesPod {}\n"
+    )
+    (src / "Clean.swift").write_text(
+        "import Foundation\nclass Clean {\n    func foo() {}\n}\n"
+    )
+
+    client = _make_client()
+    client.call_json.side_effect = [
+        _assessment_response(["Clean"]),
+        _prioritize_response(["Clean"]),
+    ]
+    client.call.return_value = SAMPLE_TEST
+
+    config = PipelineConfig(
+        path=src,
+        output_dir=tmp_path / "out",
+        module_name="MyApp",
+        method_limit=10,
+    )
+    report = run_pipeline(config, client)
+
+    by_name = {r.class_name: r for r in report.class_results}
+    assert "UsesPod" in by_name
+    assert by_name["UsesPod"].status == "skipped"
+    assert "Alamofire" in (by_name["UsesPod"].error_summary or "")
+    # The clean class still went through generation
+    assert "Clean" in by_name
+    assert by_name["Clean"].status != "skipped"
+
+
 def test_generate_report_renders_markdown_sections(tmp_path: Path):
     target_file = FIXTURES / "network_service.swift"
     client = _make_client()
