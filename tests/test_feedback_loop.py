@@ -99,6 +99,29 @@ def test_validate_and_fix_compiles_after_one_fix_then_test_fixed(tmp_path: Path)
     assert steps == ["compile", "compile", "test", "compile", "test"]
 
 
+def test_validate_and_fix_passes_workspace_to_xcodebuild(tmp_path: Path):
+    config = FeedbackLoopConfig(
+        xcworkspace=tmp_path / "App.xcworkspace",
+        scheme="App",
+        test_target_dir=tmp_path,
+        max_retries=1,
+    )
+    compile_fn = MagicMock(return_value=(True, "** BUILD SUCCEEDED **"))
+    run_fn = MagicMock(return_value=(True, "** TEST SUCCEEDED **"))
+
+    validate_and_fix(
+        _generated(), "// src", config,
+        claude_client=MagicMock(),
+        compile_fn=compile_fn, run_fn=run_fn,
+    )
+
+    # compile_fn should have been called with xcworkspace kwarg set, xcodeproj None
+    kwargs = compile_fn.call_args.kwargs
+    assert kwargs.get("xcworkspace") == tmp_path / "App.xcworkspace"
+    args = compile_fn.call_args.args
+    assert args[1] is None  # xcodeproj positional arg
+
+
 def test_validate_and_fix_gives_up_after_max_retries(tmp_path: Path):
     config = FeedbackLoopConfig(
         xcodeproj=tmp_path / "App.xcodeproj",

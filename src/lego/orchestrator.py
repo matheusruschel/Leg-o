@@ -43,6 +43,7 @@ class PipelineConfig:
     method_limit: int = 50
     # Validation
     xcodeproj: Optional[Path] = None
+    xcworkspace: Optional[Path] = None
     scheme: Optional[str] = None
     test_target_dir: Optional[Path] = None
     max_retries: int = 3
@@ -112,6 +113,13 @@ def run_pipeline(
     report.token_usage = claude_client.tracker.report()
     report.estimated_cost = claude_client.tracker.estimated_cost()
     return report
+
+
+def autodetect_workspace(xcodeproj: Path) -> Path | None:
+    """If a sibling .xcworkspace exists next to the .xcodeproj, return it."""
+    proj = Path(xcodeproj)
+    sibling = proj.with_suffix(".xcworkspace")
+    return sibling if sibling.exists() else None
 
 
 def _resolve_pod_modules(config: PipelineConfig) -> set[str]:
@@ -219,6 +227,7 @@ def _generate_for_classes(
 
         loop_config = FeedbackLoopConfig(
             xcodeproj=config.xcodeproj,
+            xcworkspace=config.xcworkspace,
             scheme=config.scheme,
             test_target_dir=config.test_target_dir or config.output_dir,
             max_retries=config.max_retries,

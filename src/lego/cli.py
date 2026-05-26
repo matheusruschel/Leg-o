@@ -9,7 +9,7 @@ import click
 from .scanner import file_discovery, swift_scanner, objc_scanner
 from .analyzer import assess_testability, filter_testable, prioritize_methods, apply_limit
 from .llm import ClaudeClient
-from .orchestrator import PipelineConfig, run_pipeline
+from .orchestrator import PipelineConfig, autodetect_workspace, run_pipeline
 from .reporter import generate_report
 
 
@@ -101,7 +101,10 @@ def analyze(
 @click.option("--api-key", envvar="ANTHROPIC_API_KEY", required=True)
 @click.option("--model", default="claude-sonnet-4-5-20250929")
 @click.option("--module-name", default="App", help="Swift module name for @testable import.")
-@click.option("--xcodeproj", type=click.Path(path_type=Path), default=None)
+@click.option("--xcodeproj", type=click.Path(path_type=Path), default=None,
+              help="Path to .xcodeproj. If a sibling .xcworkspace exists, it is preferred.")
+@click.option("--xcworkspace", type=click.Path(path_type=Path), default=None,
+              help="Path to .xcworkspace (required for CocoaPods/SPM-workspace projects).")
 @click.option("--scheme", default=None)
 @click.option("--test-target-dir", type=click.Path(path_type=Path), default=None)
 @click.option("--max-retries", default=3, type=int)
@@ -123,6 +126,7 @@ def generate(
     model: str,
     module_name: str,
     xcodeproj: Path | None,
+    xcworkspace: Path | None,
     scheme: str | None,
     test_target_dir: Path | None,
     max_retries: int,
@@ -135,6 +139,11 @@ def generate(
     skip_modules: tuple[str, ...],
 ) -> None:
     """Run the full pipeline: scan → analyze → generate → (validate) → report."""
+    if xcworkspace is None and xcodeproj is not None:
+        detected = autodetect_workspace(xcodeproj)
+        if detected is not None:
+            click.echo(f"(auto-detected sibling workspace: {detected}; using -workspace)", err=True)
+            xcworkspace = detected
     config = PipelineConfig(
         path=path,
         output_dir=output,
@@ -143,6 +152,7 @@ def generate(
         batch_size=batch_size,
         method_limit=method_limit,
         xcodeproj=xcodeproj,
+        xcworkspace=xcworkspace,
         scheme=scheme,
         test_target_dir=test_target_dir,
         max_retries=max_retries,

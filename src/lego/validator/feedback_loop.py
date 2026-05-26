@@ -16,6 +16,7 @@ log = logging.getLogger(__name__)
 @dataclass
 class FeedbackLoopConfig:
     xcodeproj: Optional[Path] = None
+    xcworkspace: Optional[Path] = None
     scheme: Optional[str] = None
     test_target_dir: Optional[Path] = None
     max_retries: int = 3
@@ -29,10 +30,11 @@ def validate_and_fix(
     compile_fn: Optional[Callable] = None,
     run_fn: Optional[Callable] = None,
 ) -> ValidationResult:
-    if config.xcodeproj is None or config.scheme is None or config.test_target_dir is None:
+    has_target = config.xcodeproj is not None or config.xcworkspace is not None
+    if not has_target or config.scheme is None or config.test_target_dir is None:
         return ValidationResult(
             skipped=True,
-            skipped_reason="no xcodeproj/scheme/test_target_dir provided; skipping validation",
+            skipped_reason="no xcodeproj/xcworkspace/scheme/test_target_dir provided; skipping validation",
         )
 
     # Lazy import to keep tests fast and avoid the macOS-only path at module load.
@@ -48,6 +50,7 @@ def validate_and_fix(
     for attempt in range(config.max_retries + 1):
         compiled, compile_output = compile_fn(
             test_path, config.xcodeproj, config.scheme,
+            xcworkspace=config.xcworkspace,
         )
         result.iterations.append(
             ValidationIteration(
@@ -73,6 +76,7 @@ def validate_and_fix(
         passed, test_output = run_fn(
             test_path, config.xcodeproj, config.scheme,
             test_class=f"{current_test.target_class}Tests",
+            xcworkspace=config.xcworkspace,
         )
         result.iterations.append(
             ValidationIteration(

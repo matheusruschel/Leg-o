@@ -23,52 +23,52 @@ def _ensure_xcodebuild() -> str:
     return path
 
 
-def _ensure_project(xcodeproj: Path) -> None:
-    if not Path(xcodeproj).exists():
-        raise FileNotFoundError(f"xcode project not found: {xcodeproj}")
+def _project_flags(xcodeproj: Path | None, xcworkspace: Path | None) -> list[str]:
+    """Return the right -workspace/-project CLI flags. Workspace wins when both are set."""
+    if xcworkspace is not None:
+        target = Path(xcworkspace)
+        if not target.exists():
+            raise FileNotFoundError(f"xcode workspace not found: {target}")
+        return ["-workspace", str(target)]
+    if xcodeproj is not None:
+        target = Path(xcodeproj)
+        if not target.exists():
+            raise FileNotFoundError(f"xcode project not found: {target}")
+        return ["-project", str(target)]
+    raise ValueError("must provide either xcodeproj or xcworkspace")
 
 
 def compile_test(
     test_file_path: Path,
-    xcodeproj: Path,
+    xcodeproj: Path | None,
     scheme: str,
     destination: str = DEFAULT_DESTINATION,
     timeout: int = DEFAULT_COMPILE_TIMEOUT,
     runner=subprocess.run,
+    xcworkspace: Path | None = None,
 ) -> tuple[bool, str]:
     """Run `xcodebuild build-for-testing`. Returns (success, combined_output)."""
     xcb = _ensure_xcodebuild()
-    _ensure_project(xcodeproj)
-    cmd = [
-        xcb,
-        "build-for-testing",
-        "-project", str(xcodeproj),
-        "-scheme", scheme,
-        "-destination", destination,
-    ]
+    cmd = [xcb, "build-for-testing", *_project_flags(xcodeproj, xcworkspace),
+           "-scheme", scheme, "-destination", destination]
     return _run(runner, cmd, timeout)
 
 
 def run_test(
     test_file_path: Path,
-    xcodeproj: Path,
+    xcodeproj: Path | None,
     scheme: str,
     test_class: str,
     destination: str = DEFAULT_DESTINATION,
     timeout: int = DEFAULT_TEST_TIMEOUT,
     runner=subprocess.run,
+    xcworkspace: Path | None = None,
 ) -> tuple[bool, str]:
     """Run `xcodebuild test` scoped to a single test class. Returns (success, output)."""
     xcb = _ensure_xcodebuild()
-    _ensure_project(xcodeproj)
-    cmd = [
-        xcb,
-        "test",
-        "-project", str(xcodeproj),
-        "-scheme", scheme,
-        "-destination", destination,
-        f"-only-testing:{scheme}Tests/{test_class}",
-    ]
+    cmd = [xcb, "test", *_project_flags(xcodeproj, xcworkspace),
+           "-scheme", scheme, "-destination", destination,
+           f"-only-testing:{scheme}Tests/{test_class}"]
     return _run(runner, cmd, timeout)
 
 
