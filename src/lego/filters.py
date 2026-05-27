@@ -91,8 +91,19 @@ def is_empty_method(m: MethodMetadata) -> bool:
     return stripped == ""
 
 
+def is_private_method(m: MethodMetadata) -> bool:
+    """Methods we shouldn't test directly. @testable import gives access to
+    internal/public/open, but private/fileprivate stay sealed."""
+    return m.access_level in {"private", "fileprivate"}
+
+
 def filter_non_empty_methods(meta: ClassMetadata) -> list[MethodMetadata]:
     return [m for m in meta.methods if not is_empty_method(m)]
+
+
+def filter_testable_methods(meta: ClassMetadata) -> list[MethodMetadata]:
+    """Methods worth generating tests for: non-empty and non-private."""
+    return [m for m in meta.methods if not is_empty_method(m) and not is_private_method(m)]
 
 
 # ---------------------------------------------------------------------------

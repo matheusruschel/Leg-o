@@ -6,9 +6,11 @@ from lego.filters import (
     covered_methods_in,
     detect_test_framework,
     filter_non_empty_methods,
+    filter_testable_methods,
     find_existing_test_files,
     is_data_holder,
     is_empty_method,
+    is_private_method,
     is_ui_type,
 )
 from lego.models import ClassMetadata, MethodMetadata
@@ -20,8 +22,8 @@ def _class(name="Foo", **kwargs) -> ClassMetadata:
     return ClassMetadata(**base)
 
 
-def _method(name="foo", body="", line_count=0) -> MethodMetadata:
-    return MethodMetadata(name=name, body_text=body, line_count=line_count)
+def _method(name="foo", body="", line_count=0, access_level="internal") -> MethodMetadata:
+    return MethodMetadata(name=name, body_text=body, line_count=line_count, access_level=access_level)
 
 
 # ---- UI types ----
@@ -100,6 +102,28 @@ def test_is_empty_method_true_for_empty_body():
 
 def test_is_empty_method_false_when_body_has_code():
     assert is_empty_method(_method(body="return 42")) is False
+
+
+def test_is_private_method_true_for_private_and_fileprivate():
+    assert is_private_method(_method(access_level="private")) is True
+    assert is_private_method(_method(access_level="fileprivate")) is True
+
+
+def test_is_private_method_false_for_internal_public_open():
+    assert is_private_method(_method(access_level="internal")) is False
+    assert is_private_method(_method(access_level="public")) is False
+    assert is_private_method(_method(access_level="open")) is False
+
+
+def test_filter_testable_methods_drops_empty_and_private():
+    c = _class(methods=[
+        _method(name="pub", body="return 1", line_count=1, access_level="public"),
+        _method(name="priv", body="return 2", line_count=1, access_level="private"),
+        _method(name="empty", body="", access_level="internal"),
+        _method(name="internal", body="if x {}", line_count=2, access_level="internal"),
+    ])
+    kept = filter_testable_methods(c)
+    assert [m.name for m in kept] == ["pub", "internal"]
 
 
 def test_filter_non_empty_methods_drops_empties():

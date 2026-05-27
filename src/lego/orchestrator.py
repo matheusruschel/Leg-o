@@ -17,6 +17,7 @@ from .filters import (
     find_existing_test_files,
     is_data_holder,
     is_empty_method,
+    is_private_method,
     is_ui_type,
 )
 from .generator import build_context, generate_tests
@@ -149,12 +150,18 @@ def _resolve_generation_targets(
     skipped_already_covered = 0
     for meta in target_classes:
         methods = _methods_for_class(meta.name, ranked) or [m.name for m in meta.methods]
-        empty_method_names = {m.name for m in meta.methods if is_empty_method(m)}
-        methods = [m for m in methods if m not in empty_method_names]
+        # Drop methods we know are empty or private; methods we can't locate
+        # on the ClassMetadata pass through.
+        skipped_names = {
+            m.name for m in meta.methods
+            if is_empty_method(m) or is_private_method(m)
+        }
+        methods = [m for m in methods if m not in skipped_names]
         if not methods:
             report.class_results.append(ClassResult(
                 class_name=meta.name, file_path=meta.file_path,
-                status="skipped", error_summary="no non-empty methods to test",
+                status="skipped",
+                error_summary="no public/internal non-empty methods to test",
             ))
             continue
         existing_path = existing_test_files.get(meta.name)
