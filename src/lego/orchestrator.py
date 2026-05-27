@@ -13,6 +13,7 @@ from .analyzer import (
 )
 from .filters import (
     covered_methods_in,
+    detect_test_framework,
     find_existing_test_files,
     is_data_holder,
     is_empty_method,
@@ -81,6 +82,8 @@ class PipelineConfig:
     skip_ui_types: bool = True
     skip_data_holders: bool = True
     regenerate_existing: bool = False  # False → augment existing test files instead
+    # Test framework: None → auto-detect from existing test files, else 'xctest' / 'swift_testing'
+    framework: Optional[str] = None
 
 
 def build_generation_plan(
@@ -378,6 +381,13 @@ def _generate_for_targets(
     by_file_path = {sf.path: sf for sf in files}
     results: list[ClassResult] = []
 
+    framework = config.framework
+    if framework is None:
+        framework = detect_test_framework(config.test_target_dir or config.output_dir)
+        log.info("test framework: %s (auto-detected)", framework)
+    else:
+        log.info("test framework: %s (explicit)", framework)
+
     total = len(targets)
     for idx, (meta, methods, existing_path) in enumerate(targets, start=1):
         analysis = by_class_name.get(meta.name)
@@ -411,7 +421,8 @@ def _generate_for_targets(
                 )
             else:
                 generated = generate_tests(
-                    bundle, claude_client, methods, module_name=config.module_name,
+                    bundle, claude_client, methods,
+                    module_name=config.module_name, framework=framework,
                 )
         except InvalidTestOutput as e:
             results.append(ClassResult(

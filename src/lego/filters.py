@@ -84,10 +84,41 @@ def filter_non_empty_methods(meta: ClassMetadata) -> list[MethodMetadata]:
 # ---------------------------------------------------------------------------
 
 _TEST_FILE_RE = re.compile(r"^(.+?)Tests\.(swift|m)$")
-# Captures whatever follows "test_" or "test" (camelCase). Greedy enough to grab the method name
-# segment but stops at the first underscore-separated section.
-_SWIFT_TEST_METHOD_RE = re.compile(r"func\s+test_?([A-Za-z][A-Za-z0-9]*)")
-_OBJC_TEST_METHOD_RE = re.compile(r"-\s*\(void\)\s*test_?([A-Za-z][A-Za-z0-9]*)")
+# Captures the identifier after "test_"/"test" — includes underscores so that
+# `methodName_scenario` is one chunk we can prefix-match against `methodName`.
+_SWIFT_TEST_METHOD_RE = re.compile(r"func\s+test_?([A-Za-z][A-Za-z0-9_]*)")
+_OBJC_TEST_METHOD_RE = re.compile(r"-\s*\(void\)\s*test_?([A-Za-z][A-Za-z0-9_]*)")
+# Swift Testing (Xcode 16) — methods don't need a `test` prefix; discovery is
+# attribute-based. Match `@Test ... func name(...)`, allowing args/labels on
+# the @Test attribute and arbitrary whitespace/newlines between attr and func.
+_SWIFT_TESTING_METHOD_RE = re.compile(
+    r"@Test\b(?:\([^)]*\))?\s*func\s+([A-Za-z][A-Za-z0-9_]*)",
+    re.DOTALL,
+)
+
+
+def detect_test_framework(test_dir: Path) -> str:
+    """Look at existing test files and return 'swift_testing' or 'xctest'.
+
+    Counts `import Testing` vs `import XCTest` across .swift files in the dir.
+    Whichever is more common wins. Defaults to 'xctest' when there's a tie or
+    the directory is empty — safer for legacy projects.
+    """
+    test_dir = Path(test_dir)
+    if not test_dir.exists():
+        return "xctest"
+    xctest = 0
+    swift_testing = 0
+    for entry in test_dir.rglob("*.swift"):
+        try:
+            text = entry.read_text(errors="ignore")
+        except OSError:
+            continue
+        if re.search(r"^\s*import\s+Testing\b", text, re.MULTILINE):
+            swift_testing += 1
+        if re.search(r"^\s*import\s+XCTest\b", text, re.MULTILINE):
+            xctest += 1
+    return "swift_testing" if swift_testing > xctest else "xctest"
 
 
 def find_existing_test_files(test_dir: Path) -> dict[str, Path]:
@@ -131,6 +162,8 @@ def covered_methods_in(
     for match in _SWIFT_TEST_METHOD_RE.finditer(text):
         raw_tokens.append(match.group(1))
     for match in _OBJC_TEST_METHOD_RE.finditer(text):
+        raw_tokens.append(match.group(1))
+    for match in _SWIFT_TESTING_METHOD_RE.finditer(text):
         raw_tokens.append(match.group(1))
 
     if candidate_methods is None:

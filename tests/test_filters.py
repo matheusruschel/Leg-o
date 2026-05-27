@@ -4,6 +4,7 @@ from pathlib import Path
 
 from lego.filters import (
     covered_methods_in,
+    detect_test_framework,
     filter_non_empty_methods,
     find_existing_test_files,
     is_data_holder,
@@ -117,10 +118,11 @@ def test_covered_methods_in_extracts_swift_and_objc(tmp_path: Path):
         "}\n"
     )
     names = covered_methods_in(f)
-    # All normalized to lowerCamelCase first segment
-    assert "fetchUser" in names
+    # Legacy mode: returns full normalized identifiers (no prefix splitting).
+    # Callers normally pass candidate_methods for proper prefix-matching.
+    assert "fetchUser_validId_returnsUser" in names
     assert "runBlock" in names
-    assert "save" in names
+    assert "save_failure_returnsError" in names
 
 
 def test_covered_methods_in_missing_file_returns_empty(tmp_path: Path):
@@ -164,6 +166,53 @@ def test_covered_methods_in_with_candidates_underscore_form(tmp_path: Path):
         f, candidate_methods=["isShortReturn", "saveSession", "clearSession"],
     )
     assert covered == {"isShortReturn", "saveSession"}
+
+
+def test_covered_methods_in_swift_testing_with_candidates(tmp_path: Path):
+    """Swift Testing files: @Test func methodName_scenario_result() — no test_ prefix."""
+    f = tmp_path / "LiveStreamResumeServiceTests.swift"
+    f.write_text(
+        "import Testing\n"
+        "import Foundation\n"
+        "@testable import App\n"
+        "\n"
+        "@Suite(\"LiveStreamResumeService\")\n"
+        "struct LiveStreamResumeServiceTests {\n"
+        "    @Test(\"saveSession persists\")\n"
+        "    func saveSession_storesEventId() {}\n"
+        "\n"
+        "    @Test(\"isShortReturn with no session\")\n"
+        "    func isShortReturn_withNoStoredSession_returnsFalse() {}\n"
+        "\n"
+        "    @Test func isShortReturn_atExactThreshold_returnsTrue() {}\n"
+        "}\n"
+    )
+    covered = covered_methods_in(
+        f, candidate_methods=["isShortReturn", "saveSession", "clearSession", "storedEventId"],
+    )
+    assert covered == {"isShortReturn", "saveSession"}
+
+
+def test_detect_test_framework_swift_testing(tmp_path: Path):
+    (tmp_path / "AlphaTests.swift").write_text("import Testing\n@Suite struct A {}\n")
+    (tmp_path / "BetaTests.swift").write_text("import Testing\n@Suite struct B {}\n")
+    assert detect_test_framework(tmp_path) == "swift_testing"
+
+
+def test_detect_test_framework_xctest(tmp_path: Path):
+    (tmp_path / "AlphaTests.swift").write_text("import XCTest\nclass A: XCTestCase {}\n")
+    assert detect_test_framework(tmp_path) == "xctest"
+
+
+def test_detect_test_framework_defaults_to_xctest_when_empty(tmp_path: Path):
+    assert detect_test_framework(tmp_path) == "xctest"
+
+
+def test_detect_test_framework_majority_wins(tmp_path: Path):
+    (tmp_path / "AlphaTests.swift").write_text("import XCTest\nclass A: XCTestCase {}\n")
+    (tmp_path / "BetaTests.swift").write_text("import Testing\n@Suite struct B {}\n")
+    (tmp_path / "GammaTests.swift").write_text("import Testing\n@Suite struct G {}\n")
+    assert detect_test_framework(tmp_path) == "swift_testing"
 
 
 def test_covered_methods_in_with_candidates_does_not_overmatch(tmp_path: Path):

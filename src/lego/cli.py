@@ -152,6 +152,10 @@ def analyze(
               help="Don't auto-skip pure data structs/enums with no logic.")
 @click.option("--regenerate-existing", is_flag=True, default=False,
               help="Overwrite existing *Tests.swift files instead of augmenting them.")
+@click.option("--framework", type=click.Choice(["auto", "xctest", "swift_testing"]),
+              default="auto",
+              help="Test framework for newly generated files. 'auto' picks based on "
+                   "what existing test files in --test-target-dir use.")
 @click.option("--yes", "-y", is_flag=True, default=False,
               help="Skip the pre-generation confirm prompt (for CI / scripting).")
 def generate(
@@ -177,6 +181,7 @@ def generate(
     include_views: bool,
     include_data_holders: bool,
     regenerate_existing: bool,
+    framework: str,
     yes: bool,
 ) -> None:
     """Run the full pipeline: scan → analyze → generate → (validate) → report."""
@@ -221,6 +226,7 @@ def generate(
         skip_ui_types=not include_views,
         skip_data_holders=not include_data_holders,
         regenerate_existing=regenerate_existing,
+        framework=None if framework == "auto" else framework,
     )
     output.mkdir(parents=True, exist_ok=True)
     client = ClaudeClient(api_key=api_key, model=model)

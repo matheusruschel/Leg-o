@@ -8,6 +8,9 @@ from ..models import ContextBundle, GeneratedTest
 
 
 _GENERATE_TEMPLATE = Path(__file__).parent / "templates" / "generate.txt"
+_GENERATE_SWIFT_TESTING_TEMPLATE = (
+    Path(__file__).parent / "templates" / "generate_swift_testing.txt"
+)
 _FIX_TEMPLATE = Path(__file__).parent / "templates" / "fix.txt"
 _AUGMENT_TEMPLATE = Path(__file__).parent / "templates" / "augment.txt"
 
@@ -24,8 +27,12 @@ def generate_tests(
     methods: list[str],
     module_name: str,
     max_tokens: int = 4096,
+    framework: str = "xctest",
 ) -> GeneratedTest:
-    template = _GENERATE_TEMPLATE.read_text()
+    if framework == "swift_testing":
+        template = _GENERATE_SWIFT_TESTING_TEMPLATE.read_text()
+    else:
+        template = _GENERATE_TEMPLATE.read_text()
     related_block = _format_related(context.related_contents)
     prompt = (
         template.replace("{target_content}", context.target_content)
@@ -154,11 +161,19 @@ def _strip_fences(text: str) -> str:
 
 
 def _validate_xctest(code: str) -> None:
-    if "import XCTest" not in code:
-        raise InvalidTestOutput("missing `import XCTest`")
-    if not re.search(r"class\s+\w+\s*:\s*XCTestCase", code) and not re.search(
-        r"class\s+\w*Tests\b", code
-    ):
-        raise InvalidTestOutput("no XCTestCase subclass found")
-    if not re.search(r"func\s+test\w*", code):
-        raise InvalidTestOutput("no test methods found")
+    is_xctest = "import XCTest" in code
+    is_swift_testing = "import Testing" in code
+    if not (is_xctest or is_swift_testing):
+        raise InvalidTestOutput("missing `import XCTest` or `import Testing`")
+
+    if is_xctest:
+        if not re.search(r"class\s+\w+\s*:\s*XCTestCase", code) and not re.search(
+            r"class\s+\w*Tests\b", code
+        ):
+            raise InvalidTestOutput("no XCTestCase subclass found")
+        if not re.search(r"func\s+test\w*", code):
+            raise InvalidTestOutput("no test methods found")
+    else:
+        # Swift Testing — accept either a @Suite type or a top-level @Test.
+        if not re.search(r"@Suite\b", code) and not re.search(r"@Test\b", code):
+            raise InvalidTestOutput("no @Suite/@Test annotations found")
