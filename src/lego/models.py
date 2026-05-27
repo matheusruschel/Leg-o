@@ -188,6 +188,8 @@ class GenerationPlanItem(BaseModel):
     estimated_input_tokens: int = 0
     estimated_output_tokens: int = 0
     estimated_cost_usd: float = 0.0
+    mode: Literal["generate", "augment"] = "generate"
+    existing_test_path: Optional[Path] = None
 
 
 class GenerationPlan(BaseModel):

@@ -84,18 +84,28 @@ class PipelineConfig:
 
 
 def build_generation_plan(
-    target_classes: list[ClassMetadata],
-    ranked: list[PrioritizedMethod],
+    targets: list[GenerationTarget],
     claude_client: ClaudeClient,
 ) -> GenerationPlan:
-    """Project per-class token usage + cost for the upcoming generation step."""
+    """Project per-class token usage + cost for the upcoming generation step.
+
+    `targets` is the output of _resolve_generation_targets — each entry is
+    (class_meta, methods_to_generate, existing_test_path_or_None). Augment-mode
+    entries (existing path present) cost more input tokens because we send the
+    existing test file content along too.
+    """
     tracker = claude_client.tracker
     in_rate, out_rate = tracker.pricing.get(tracker.model, tracker.pricing["default"])
 
     items: list[GenerationPlanItem] = []
-    for meta in target_classes:
-        methods = _methods_for_class(meta.name, ranked) or [m.name for m in meta.methods]
+    for meta, methods, existing_path in targets:
+        augment = existing_path is not None
         in_tok = _EST_INPUT_TOKENS_PER_CLASS
+        if augment:
+            try:
+                in_tok += max(0, len(existing_path.read_text(errors="ignore")) // 4)
+            except OSError:
+                pass
         out_tok = max(1, len(methods)) * _EST_OUTPUT_TOKENS_PER_METHOD
         cost = in_tok * in_rate / 1_000_000 + out_tok * out_rate / 1_000_000
         items.append(GenerationPlanItem(
@@ -105,6 +115,8 @@ def build_generation_plan(
             estimated_input_tokens=in_tok,
             estimated_output_tokens=out_tok,
             estimated_cost_usd=round(cost, 4),
+            mode="augment" if augment else "generate",
+            existing_test_path=existing_path,
         ))
 
     return GenerationPlan(
@@ -115,6 +127,54 @@ def build_generation_plan(
         analysis_cost_so_far_usd=round(tracker.estimated_cost(), 6),
         model=tracker.model,
     )
+
+
+GenerationTarget = tuple[ClassMetadata, list[str], "Path | None"]
+
+
+def _resolve_generation_targets(
+    target_classes: list[ClassMetadata],
+    ranked: list[PrioritizedMethod],
+    config: PipelineConfig,
+    report: PipelineReport,
+) -> list[GenerationTarget]:
+    """Decide per class: (re)generate fresh, augment existing tests, or skip."""
+    existing_tests_dir = config.test_target_dir or config.output_dir
+    existing_test_files = find_existing_test_files(existing_tests_dir)
+
+    targets: list[GenerationTarget] = []
+    skipped_already_covered = 0
+    for meta in target_classes:
+        methods = _methods_for_class(meta.name, ranked) or [m.name for m in meta.methods]
+        empty_method_names = {m.name for m in meta.methods if is_empty_method(m)}
+        methods = [m for m in methods if m not in empty_method_names]
+        if not methods:
+            report.class_results.append(ClassResult(
+                class_name=meta.name, file_path=meta.file_path,
+                status="skipped", error_summary="no non-empty methods to test",
+            ))
+            continue
+        existing_path = existing_test_files.get(meta.name)
+        if existing_path and not config.regenerate_existing:
+            covered = covered_methods_in(existing_path)
+            uncovered = [m for m in methods if m not in covered]
+            if not uncovered:
+                report.class_results.append(ClassResult(
+                    class_name=meta.name, file_path=meta.file_path,
+                    status="skipped",
+                    error_summary="all methods already covered by existing tests",
+                    output_path=existing_path,
+                ))
+                skipped_already_covered += 1
+                continue
+            targets.append((meta, uncovered, existing_path))
+        else:
+            targets.append((meta, methods, None))
+
+    if skipped_already_covered:
+        log.info("skipped %d class(es) that already have full test coverage",
+                 skipped_already_covered)
+    return targets
 
 
 def run_pipeline(
@@ -175,8 +235,10 @@ def run_pipeline(
             report.refactoring_needed = _refactor_summary(assessments, testable)
             target_classes = _group_by_class(classes, ranked)
 
-        if confirm_callback is not None and not config.dry_run and target_classes:
-            plan = build_generation_plan(target_classes, ranked, claude_client)
+        targets = _resolve_generation_targets(target_classes, ranked, config, report)
+
+        if confirm_callback is not None and not config.dry_run and targets:
+            plan = build_generation_plan(targets, claude_client)
             decision = confirm_callback(plan)
             if not decision:
                 log.info("user declined generation plan; aborting before generate")
@@ -185,18 +247,18 @@ def run_pipeline(
                 return report
             if isinstance(decision, (set, list, tuple)):
                 keep = set(decision)
-                excluded = [c.name for c in target_classes if c.name not in keep]
-                target_classes = [c for c in target_classes if c.name in keep]
-                ranked = [m for m in ranked if m.class_name in keep]
-                for name in excluded:
+                excluded_targets = [t for t in targets if t[0].name not in keep]
+                targets = [t for t in targets if t[0].name in keep]
+                for meta, _m, _p in excluded_targets:
                     report.class_results.append(ClassResult(
-                        class_name=name, status="skipped",
+                        class_name=meta.name, status="skipped",
                         error_summary="excluded by user at confirm step",
                     ))
-                log.info("user kept %d of %d classes", len(target_classes), len(target_classes) + len(excluded))
+                log.info("user kept %d of %d classes",
+                         len(targets), len(targets) + len(excluded_targets))
 
-        generated_results = _generate_for_classes(
-            target_classes, files, assessments, ranked, config, claude_client,
+        generated_results = _generate_for_targets(
+            targets, files, assessments, config, claude_client,
             compile_fn=compile_fn, run_fn=run_fn,
         )
         report.class_results.extend(generated_results)
@@ -303,11 +365,10 @@ def _methods_for_class(class_name: str, ranked: list[PrioritizedMethod]) -> list
     return [m.method_name for m in ranked if m.class_name == class_name]
 
 
-def _generate_for_classes(
-    target_classes: list[ClassMetadata],
+def _generate_for_targets(
+    targets: list[GenerationTarget],
     files: list[SwiftFile],
     assessments: list[TestabilityResult],
-    ranked: list[PrioritizedMethod],
     config: PipelineConfig,
     claude_client: ClaudeClient,
     compile_fn: Optional[Callable] = None,
@@ -317,49 +378,8 @@ def _generate_for_classes(
     by_file_path = {sf.path: sf for sf in files}
     results: list[ClassResult] = []
 
-    # Discover existing test files once so augment mode is cheap.
-    existing_tests_dir = config.test_target_dir or config.output_dir
-    existing_test_files = find_existing_test_files(existing_tests_dir)
-
-    total = len(target_classes)
-    skipped_already_covered = 0
-    classes_to_process = list(target_classes)
-    final: list[tuple[ClassMetadata, list[str], Path | None]] = []
-    for meta in classes_to_process:
-        methods = _methods_for_class(meta.name, ranked) or [m.name for m in meta.methods]
-        # Drop methods we *know* have empty bodies. Methods we can't find on the
-        # ClassMetadata (e.g., from prompt responses that name a method we didn't
-        # scan) get the benefit of the doubt and pass through.
-        empty_method_names = {m.name for m in meta.methods if is_empty_method(m)}
-        methods = [m for m in methods if m not in empty_method_names]
-        if not methods:
-            results.append(ClassResult(
-                class_name=meta.name, file_path=meta.file_path,
-                status="skipped", error_summary="no non-empty methods to test",
-            ))
-            continue
-        existing_path = existing_test_files.get(meta.name)
-        if existing_path and not config.regenerate_existing:
-            covered = covered_methods_in(existing_path)
-            uncovered = [m for m in methods if m not in covered]
-            if not uncovered:
-                results.append(ClassResult(
-                    class_name=meta.name, file_path=meta.file_path,
-                    status="skipped", error_summary="all methods already covered by existing tests",
-                    output_path=existing_path,
-                ))
-                skipped_already_covered += 1
-                continue
-            final.append((meta, uncovered, existing_path))
-        else:
-            final.append((meta, methods, None))
-
-    if skipped_already_covered:
-        log.info("skipped %d class(es) that already have full test coverage",
-                 skipped_already_covered)
-
-    total = len(final)
-    for idx, (meta, methods, existing_path) in enumerate(final, start=1):
+    total = len(targets)
+    for idx, (meta, methods, existing_path) in enumerate(targets, start=1):
         analysis = by_class_name.get(meta.name)
         mode = "augmenting" if existing_path else "generating"
         log.info("[%d/%d] %s tests for %s (%d method(s))",

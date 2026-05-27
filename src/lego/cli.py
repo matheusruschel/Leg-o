@@ -246,9 +246,14 @@ def _interactive_confirm(plan: GenerationPlan):
     click.echo(f"Classes to generate: {len(plan.items)}\n")
     for idx, item in enumerate(plan.items, start=1):
         methods = ", ".join(item.methods) if item.methods else "(no methods)"
+        tag = "augment" if item.mode == "augment" else "new"
+        suffix = (
+            f"  (adding to {item.existing_test_path.name})"
+            if item.existing_test_path else ""
+        )
         click.echo(
-            f"  [{idx:>2}] {item.class_name} "
-            f"({len(item.methods)} method(s)): {methods}"
+            f"  [{idx:>2}] [{tag}] {item.class_name} "
+            f"({len(item.methods)} method(s)): {methods}{suffix}"
         )
         click.echo(
             f"        ~{item.estimated_input_tokens} in + {item.estimated_output_tokens} out tokens, "

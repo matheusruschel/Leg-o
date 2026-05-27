@@ -200,14 +200,15 @@ def test_build_generation_plan_computes_per_class_cost():
     assert network, "fixture should produce at least one class"
 
     client = _make_client()  # tracker defaults to "default" pricing 3/15
-    ranked = []  # no prioritized methods → fall back to all class methods
-    plan = build_generation_plan(network, ranked, client)
+    targets = [(c, [m.name for m in c.methods], None) for c in network if c.methods]
+    plan = build_generation_plan(targets, client)
 
-    assert len(plan.items) == len(network)
+    assert len(plan.items) == len(targets)
     for item in plan.items:
         assert item.estimated_input_tokens > 0
         assert item.estimated_output_tokens > 0
         assert item.estimated_cost_usd > 0
+        assert item.mode == "generate"
     assert plan.total_estimated_cost_usd == pytest.approx(
         sum(i.estimated_cost_usd for i in plan.items), abs=1e-4
     )
@@ -281,6 +282,57 @@ def test_run_pipeline_filters_classes_when_confirm_returns_subset(tmp_path: Path
     assert "excluded by user" in (by_name["B"].error_summary or "")
     # Claude was called once for generation (only for A)
     assert client.call.call_count == 1
+
+
+def test_run_pipeline_excludes_already_covered_classes_from_plan(tmp_path: Path):
+    """Classes whose methods are all covered by existing tests must not appear in the plan."""
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "TokenExpiryChecker.swift").write_text(
+        "import Foundation\nclass TokenExpiryChecker {\n"
+        "  func shouldRefresh() -> Bool { return true }\n}\n"
+    )
+    # Existing test file in the test-target dir covers shouldRefresh
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "TokenExpiryCheckerTests.swift").write_text(
+        "import XCTest\nclass TokenExpiryCheckerTests: XCTestCase {\n"
+        "  func test_shouldRefresh_expired_returnsTrue() {}\n}\n"
+    )
+
+    client = _make_client()
+    client.call_json.side_effect = [
+        _assessment_response(["TokenExpiryChecker"]),
+        [{"class_name": "TokenExpiryChecker", "method_name": "shouldRefresh",
+          "priority_score": 80, "reason": "logic"}],
+    ]
+    client.call.return_value = SAMPLE_TEST
+
+    captured = {}
+
+    def capture(plan):
+        captured["plan"] = plan
+        return True
+
+    config = PipelineConfig(
+        path=src,
+        output_dir=tmp_path / "out",
+        test_target_dir=tests_dir,
+        method_limit=10,
+    )
+    report = run_pipeline(config, client, confirm_callback=capture)
+
+    # Plan should be empty (or at least not contain TokenExpiryChecker)
+    # because shouldRefresh is already covered
+    plan = captured.get("plan")
+    if plan is not None:
+        assert all(item.class_name != "TokenExpiryChecker" for item in plan.items)
+    # And the report should record it as already-covered
+    skipped = [r for r in report.class_results if r.class_name == "TokenExpiryChecker"]
+    assert skipped
+    assert "already covered" in (skipped[0].error_summary or "")
+    # No generation Claude calls
+    client.call.assert_not_called()
 
 
 def test_run_pipeline_skips_confirm_in_dry_run(tmp_path: Path):
