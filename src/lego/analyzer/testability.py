@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Iterable
 
 from ..llm.client import ClaudeClient
 from ..models import ClassMetadata, TestabilityResult
+
+log = logging.getLogger(__name__)
 
 
 _TEMPLATE_PATH = Path(__file__).parent / "templates" / "testability.txt"
@@ -36,7 +39,10 @@ def assess_testability(
     template = _load_template()
     results: list[TestabilityResult] = []
 
-    for batch in _batches(class_metadata_list, batch_size):
+    batches = list(_batches(class_metadata_list, batch_size))
+    for i, batch in enumerate(batches, start=1):
+        log.info("analyze batch %d/%d (%d classes) — calling Claude ...",
+                 i, len(batches), len(batch))
         prompt = template.replace("{classes_json}", _serialize(batch))
         response = claude_client.call_json(
             [{"role": "user", "content": prompt}],

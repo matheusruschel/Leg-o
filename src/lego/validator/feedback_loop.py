@@ -56,6 +56,8 @@ def validate_and_fix(
     test_path = write_test_file(current_test, config.test_target_dir)
 
     for attempt in range(config.max_retries + 1):
+        log.info("validating %s — compile attempt %d/%d",
+                 test_path.name, attempt + 1, config.max_retries + 1)
         compiled, compile_output = compile_fn(
             test_path, config.xcodeproj, config.scheme,
             xcworkspace=config.xcworkspace,
@@ -81,6 +83,7 @@ def validate_and_fix(
             continue
 
         result.compiled = True
+        log.info("compile OK, running %sTests ...", current_test.target_class)
 
         passed, test_output = run_fn(
             test_path, config.xcodeproj, config.scheme,

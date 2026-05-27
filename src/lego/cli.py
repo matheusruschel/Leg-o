@@ -1,10 +1,22 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from pathlib import Path
 
 import click
+
+
+def _setup_logging(verbose: bool = False) -> None:
+    """Send lego's log records to stderr with timestamps so users see progress."""
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("[%(asctime)s] %(message)s", datefmt="%H:%M:%S"))
+    root = logging.getLogger("lego")
+    root.handlers.clear()
+    root.addHandler(handler)
+    root.setLevel(logging.DEBUG if verbose else logging.INFO)
+    root.propagate = False
 
 from .scanner import file_discovery, swift_scanner, objc_scanner
 from .analyzer import assess_testability, filter_testable, prioritize_methods, apply_limit
@@ -17,8 +29,15 @@ from .reporter import generate_report
 
 @click.group()
 @click.version_option()
-def main() -> None:
+@click.option("--verbose", "-v", is_flag=True, default=False, help="Enable debug-level logging.")
+@click.option("--quiet", "-q", is_flag=True, default=False, help="Suppress progress logs (errors still print).")
+@click.pass_context
+def main(ctx: click.Context, verbose: bool, quiet: bool) -> None:
     """lego — iOS legacy test generator."""
+    if quiet:
+        logging.getLogger("lego").setLevel(logging.WARNING)
+    else:
+        _setup_logging(verbose=verbose)
 
 
 @main.command()

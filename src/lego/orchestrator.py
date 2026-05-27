@@ -141,14 +141,20 @@ def run_pipeline(
             assessments: list[TestabilityResult] = []
             ranked: list[PrioritizedMethod] = []
         else:
+            batches = (len(classes) + config.batch_size - 1) // config.batch_size
+            log.info("analyzing %d classes in %d batch(es) of %d ...",
+                     len(classes), batches, config.batch_size)
             assessments = assess_testability(classes, claude_client, batch_size=config.batch_size)
             testable = filter_testable(assessments)
             report.testable_classes = len(testable)
             report.classes_needing_refactor = len(assessments) - len(testable)
+            log.info("analyze complete: %d testable, %d need refactor",
+                     len(testable), report.classes_needing_refactor)
+            log.info("prioritizing methods across %d testable classes ...", len(testable))
             ranked_all = prioritize_methods(testable, claude_client)
             ranked = apply_limit(ranked_all, config.method_limit)
             report.top_recommendations = ranked
-            log.info("%d testable, %d methods prioritized", len(testable), len(ranked))
+            log.info("prioritized %d methods (limit %d)", len(ranked), config.method_limit)
             report.refactoring_needed = _refactor_summary(assessments, testable)
             target_classes = _group_by_class(classes, ranked)
 
@@ -206,6 +212,7 @@ def _resolve_pod_modules(config: PipelineConfig) -> set[str]:
 
 
 def _scan(config: PipelineConfig) -> tuple[list[SwiftFile], list[ClassMetadata]]:
+    log.info("scanning %s ...", config.path)
     files = file_discovery.discover_files(config.path, include_objc=config.include_objc)
     classes: list[ClassMetadata] = []
     for sf in files:
@@ -213,6 +220,7 @@ def _scan(config: PipelineConfig) -> tuple[list[SwiftFile], list[ClassMetadata]]
             classes.extend(swift_scanner.scan_file(sf))
         else:
             classes.extend(objc_scanner.scan_file(sf))
+    log.info("scan complete: %d files, %d classes", len(files), len(classes))
     return files, classes
 
 
@@ -258,10 +266,12 @@ def _generate_for_classes(
     by_file_path = {sf.path: sf for sf in files}
     results: list[ClassResult] = []
 
+    total = len(target_classes)
     for idx, meta in enumerate(target_classes, start=1):
         methods = _methods_for_class(meta.name, ranked) or [m.name for m in meta.methods]
         analysis = by_class_name.get(meta.name)
-        log.info("generating tests for %s (%d/%d)", meta.name, idx, len(target_classes))
+        log.info("[%d/%d] generating tests for %s (%d method(s))",
+                 idx, total, meta.name, len(methods))
 
         try:
             bundle = build_context(meta, files, analysis)
