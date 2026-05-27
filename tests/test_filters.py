@@ -46,6 +46,24 @@ def test_is_ui_type_passes_through_non_ui_class():
     assert is_ui_type(c) is None
 
 
+def test_is_ui_type_catches_name_suffix_with_custom_base_class():
+    """Catches views that extend a custom base class (e.g., LoadableFromNibView)."""
+    c = _class(name="ASPToggleView", superclass="LoadableFromNibView")
+    assert is_ui_type(c) is not None
+
+
+def test_is_ui_type_catches_name_suffix_no_superclass():
+    c = _class(name="NewsFeedCell")
+    assert is_ui_type(c) is not None
+
+
+def test_is_ui_type_skips_viewmodel_and_friends():
+    for name in ("NewsViewModel", "NewsViewState", "NewsViewData",
+                 "NewsViewProvider", "NewsViewBuilder"):
+        c = _class(name=name)
+        assert is_ui_type(c) is None, f"{name} should not be flagged as UI"
+
+
 # ---- Data holders ----
 
 def test_is_data_holder_no_methods_struct():

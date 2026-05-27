@@ -20,6 +20,16 @@ _UI_SUPERCLASS_PREFIXES = (
 )
 _SWIFTUI_PROTOCOLS = {"View", "App", "Scene"}
 
+# Name-suffix heuristic for projects with custom UI base classes (e.g.,
+# LoadableFromNibView). A suffix match implies UI UNLESS the name also matches
+# one of the denied "View*"-shaped suffixes that are testable in practice.
+_UI_NAME_SUFFIXES = ("View", "ViewController", "Cell", "Coordinator")
+_UI_NAME_DENY_SUFFIXES = (
+    "ViewModel", "ViewState", "ViewData", "ViewProvider",
+    "ViewBuilder", "ViewFactory", "ViewRouter", "ViewStore",
+    "ViewEvent", "ViewAction",
+)
+
 
 def is_ui_type(meta: ClassMetadata) -> str | None:
     """If the class looks like a view/view-controller, return a short reason."""
@@ -29,6 +39,12 @@ def is_ui_type(meta: ClassMetadata) -> str | None:
             return f"UI type (inherits {sc})"
     if set(meta.protocols) & _SWIFTUI_PROTOCOLS:
         return f"SwiftUI type (conforms to {sorted(set(meta.protocols) & _SWIFTUI_PROTOCOLS)})"
+    name = meta.name
+    if any(name.endswith(deny) for deny in _UI_NAME_DENY_SUFFIXES):
+        return None
+    for suffix in _UI_NAME_SUFFIXES:
+        if name.endswith(suffix):
+            return f"UI type (name ends with {suffix!r})"
     return None
 
 
