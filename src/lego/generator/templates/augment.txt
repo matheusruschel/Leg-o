@@ -1,0 +1,35 @@
+You are an expert iOS test engineer extending an existing XCTest file.
+
+TARGET FILE:
+{target_content}
+
+RELATED FILES (protocols, models, dependencies):
+{related_contents}
+
+EXISTING TEST FILE for {class_name}:
+{existing_test_content}
+
+Add new XCTest methods to the existing test class above to cover these
+previously-untested methods: {method_list}
+
+REQUIREMENTS:
+- Preserve the existing test class, setUp, tearDown, mocks, helpers, and
+  imports exactly as they are — DO NOT remove or rename anything that's
+  already there.
+- ONLY add new test methods (and any small helpers they need). If a mock
+  for a new dependency is needed, add it AS A NEW class at the bottom
+  of the file rather than modifying existing mocks.
+- Match the style of the existing tests (naming, assertion choices,
+  expectation patterns, helper conventions).
+- Test naming: test_methodName_scenario_expectedBehavior
+- For each method, include tests for:
+  - Happy path with valid inputs
+  - Nil or empty inputs where applicable
+  - Error conditions and failure paths
+  - Boundary values
+- NEVER force unwrap (!) — use XCTUnwrap or guard let + XCTFail.
+- NEVER use real network/filesystem/UserDefaults — everything mocked.
+
+Output ONLY the complete updated .swift file (the original content plus
+the new tests). No markdown fences. No explanation. No preamble.
+Just the Swift code.

@@ -11,8 +11,19 @@ from .analyzer import (
     filter_testable,
     prioritize_methods,
 )
+from .filters import (
+    covered_methods_in,
+    find_existing_test_files,
+    is_data_holder,
+    is_empty_method,
+    is_ui_type,
+)
 from .generator import build_context, generate_tests
-from .generator.test_generator import InvalidTestOutput, write_test_file
+from .generator.test_generator import (
+    InvalidTestOutput,
+    augment_tests,
+    write_test_file,
+)
 from .llm.client import ClaudeClient
 from .models import (
     ClassMetadata,
@@ -66,6 +77,10 @@ class PipelineConfig:
     # Pod handling
     skip_pod_dependent: bool = True
     extra_skip_modules: list[str] = field(default_factory=list)
+    # Heuristic filters
+    skip_ui_types: bool = True
+    skip_data_holders: bool = True
+    regenerate_existing: bool = False  # False → augment existing test files instead
 
 
 def build_generation_plan(
@@ -133,6 +148,8 @@ def run_pipeline(
                 ))
             log.info("skipped %d classes that import pod modules", len(skipped))
 
+        classes = _apply_heuristic_filters(classes, config, report)
+
         report.classes_analyzed = len(classes)
         log.info("scanned %d files, %d classes after pod filter", len(files), len(classes))
 
@@ -194,6 +211,40 @@ def run_pipeline(
     report.token_usage = claude_client.tracker.report()
     report.estimated_cost = claude_client.tracker.estimated_cost()
     return report
+
+
+def _apply_heuristic_filters(
+    classes: list[ClassMetadata],
+    config: PipelineConfig,
+    report: PipelineReport,
+) -> list[ClassMetadata]:
+    """Drop UI types and pure data holders before paying analyze tokens."""
+    kept: list[ClassMetadata] = []
+    ui_skipped = data_skipped = 0
+    for c in classes:
+        if config.skip_ui_types:
+            reason = is_ui_type(c)
+            if reason:
+                report.class_results.append(ClassResult(
+                    class_name=c.name, file_path=c.file_path,
+                    status="skipped", error_summary=reason,
+                ))
+                ui_skipped += 1
+                continue
+        if config.skip_data_holders:
+            reason = is_data_holder(c)
+            if reason:
+                report.class_results.append(ClassResult(
+                    class_name=c.name, file_path=c.file_path,
+                    status="skipped", error_summary=reason,
+                ))
+                data_skipped += 1
+                continue
+        kept.append(c)
+    if ui_skipped or data_skipped:
+        log.info("heuristic filters skipped %d UI types, %d data holders",
+                 ui_skipped, data_skipped)
+    return kept
 
 
 def autodetect_workspace(xcodeproj: Path) -> Path | None:
@@ -266,12 +317,53 @@ def _generate_for_classes(
     by_file_path = {sf.path: sf for sf in files}
     results: list[ClassResult] = []
 
+    # Discover existing test files once so augment mode is cheap.
+    existing_tests_dir = config.test_target_dir or config.output_dir
+    existing_test_files = find_existing_test_files(existing_tests_dir)
+
     total = len(target_classes)
-    for idx, meta in enumerate(target_classes, start=1):
+    skipped_already_covered = 0
+    classes_to_process = list(target_classes)
+    final: list[tuple[ClassMetadata, list[str], Path | None]] = []
+    for meta in classes_to_process:
         methods = _methods_for_class(meta.name, ranked) or [m.name for m in meta.methods]
+        # Drop methods we *know* have empty bodies. Methods we can't find on the
+        # ClassMetadata (e.g., from prompt responses that name a method we didn't
+        # scan) get the benefit of the doubt and pass through.
+        empty_method_names = {m.name for m in meta.methods if is_empty_method(m)}
+        methods = [m for m in methods if m not in empty_method_names]
+        if not methods:
+            results.append(ClassResult(
+                class_name=meta.name, file_path=meta.file_path,
+                status="skipped", error_summary="no non-empty methods to test",
+            ))
+            continue
+        existing_path = existing_test_files.get(meta.name)
+        if existing_path and not config.regenerate_existing:
+            covered = covered_methods_in(existing_path)
+            uncovered = [m for m in methods if m not in covered]
+            if not uncovered:
+                results.append(ClassResult(
+                    class_name=meta.name, file_path=meta.file_path,
+                    status="skipped", error_summary="all methods already covered by existing tests",
+                    output_path=existing_path,
+                ))
+                skipped_already_covered += 1
+                continue
+            final.append((meta, uncovered, existing_path))
+        else:
+            final.append((meta, methods, None))
+
+    if skipped_already_covered:
+        log.info("skipped %d class(es) that already have full test coverage",
+                 skipped_already_covered)
+
+    total = len(final)
+    for idx, (meta, methods, existing_path) in enumerate(final, start=1):
         analysis = by_class_name.get(meta.name)
-        log.info("[%d/%d] generating tests for %s (%d method(s))",
-                 idx, total, meta.name, len(methods))
+        mode = "augmenting" if existing_path else "generating"
+        log.info("[%d/%d] %s tests for %s (%d method(s))",
+                 idx, total, mode, meta.name, len(methods))
 
         try:
             bundle = build_context(meta, files, analysis)
@@ -291,7 +383,16 @@ def _generate_for_classes(
             continue
 
         try:
-            generated = generate_tests(bundle, claude_client, methods, module_name=config.module_name)
+            if existing_path is not None:
+                existing_content = existing_path.read_text(errors="ignore")
+                generated = augment_tests(
+                    bundle, existing_content, existing_path,
+                    claude_client, methods, module_name=config.module_name,
+                )
+            else:
+                generated = generate_tests(
+                    bundle, claude_client, methods, module_name=config.module_name,
+                )
         except InvalidTestOutput as e:
             results.append(ClassResult(
                 class_name=meta.name, methods=methods, status="generation_failed",

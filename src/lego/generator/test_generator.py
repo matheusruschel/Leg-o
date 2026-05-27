@@ -9,6 +9,7 @@ from ..models import ContextBundle, GeneratedTest
 
 _GENERATE_TEMPLATE = Path(__file__).parent / "templates" / "generate.txt"
 _FIX_TEMPLATE = Path(__file__).parent / "templates" / "fix.txt"
+_AUGMENT_TEMPLATE = Path(__file__).parent / "templates" / "augment.txt"
 
 _FENCE_RE = re.compile(r"^\s*```(?:swift)?\s*\n|\n\s*```\s*$", re.IGNORECASE)
 
@@ -50,6 +51,40 @@ def generate_tests(
     )
 
 
+def augment_tests(
+    context: ContextBundle,
+    existing_test_content: str,
+    existing_test_path: Path,
+    claude_client: ClaudeClient,
+    methods: list[str],
+    module_name: str,
+    max_tokens: int = 8_000,
+) -> GeneratedTest:
+    """Add tests for `methods` to an existing test file, returning the updated content."""
+    template = _AUGMENT_TEMPLATE.read_text()
+    related_block = _format_related(context.related_contents)
+    prompt = (
+        template.replace("{target_content}", context.target_content)
+        .replace("{related_contents}", related_block)
+        .replace("{class_name}", context.target_class)
+        .replace("{existing_test_content}", existing_test_content)
+        .replace("{method_list}", ", ".join(methods))
+    )
+    raw = claude_client.call(
+        [{"role": "user", "content": prompt}],
+        max_tokens=max_tokens,
+        call_type="generation",
+    )
+    code = _strip_fences(raw)
+    _validate_xctest(code)
+    return GeneratedTest(
+        file_content=code,
+        target_class=context.target_class,
+        target_methods=methods,
+        output_path=existing_test_path,
+    )
+
+
 def fix_tests(
     failing_test: GeneratedTest,
     error_output: str,
@@ -79,8 +114,15 @@ def fix_tests(
 
 
 def write_test_file(generated_test: GeneratedTest, output_dir: Path) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / f"{generated_test.target_class}Tests.swift"
+    # If the GeneratedTest already has an output_path (e.g., from augment_tests
+    # rewriting an existing file in place), preserve it instead of creating a
+    # sibling under output_dir.
+    if generated_test.output_path is not None:
+        path = generated_test.output_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        path = output_dir / f"{generated_test.target_class}Tests.swift"
     content = generated_test.file_content
     if not content.endswith("\n"):
         content += "\n"

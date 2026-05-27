@@ -146,6 +146,12 @@ def analyze(
               help="Don't auto-skip classes that import CocoaPods modules.")
 @click.option("--skip-module", "skip_modules", multiple=True,
               help="Additional module name(s) to treat as un-mockable; classes importing these are skipped.")
+@click.option("--include-views", is_flag=True, default=False,
+              help="Don't auto-skip UIView/UIViewController/SwiftUI View types.")
+@click.option("--include-data-holders", is_flag=True, default=False,
+              help="Don't auto-skip pure data structs/enums with no logic.")
+@click.option("--regenerate-existing", is_flag=True, default=False,
+              help="Overwrite existing *Tests.swift files instead of augmenting them.")
 @click.option("--yes", "-y", is_flag=True, default=False,
               help="Skip the pre-generation confirm prompt (for CI / scripting).")
 def generate(
@@ -168,6 +174,9 @@ def generate(
     include_objc: bool,
     no_skip_pods: bool,
     skip_modules: tuple[str, ...],
+    include_views: bool,
+    include_data_holders: bool,
+    regenerate_existing: bool,
     yes: bool,
 ) -> None:
     """Run the full pipeline: scan → analyze → generate → (validate) → report."""
@@ -209,6 +218,9 @@ def generate(
         single_file=single_file,
         skip_pod_dependent=not no_skip_pods,
         extra_skip_modules=list(skip_modules),
+        skip_ui_types=not include_views,
+        skip_data_holders=not include_data_holders,
+        regenerate_existing=regenerate_existing,
     )
     output.mkdir(parents=True, exist_ok=True)
     client = ClaudeClient(api_key=api_key, model=model)

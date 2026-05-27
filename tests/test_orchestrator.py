@@ -115,9 +115,11 @@ def test_run_pipeline_single_file_skips_analysis(tmp_path: Path):
 
     client.call_json.assert_not_called()  # no analyze calls
     assert report.classes_analyzed >= 1
-    # All generated classes came from the single file
-    for r in report.class_results:
-        assert r.output_path is not None
+    # At least one class produced an output file (the protocol gets correctly skipped
+    # since it has no methods to test).
+    generated = [r for r in report.class_results if r.output_path is not None]
+    assert generated
+    for r in generated:
         assert r.output_path.parent == tmp_path / "out"
 
 
@@ -145,7 +147,10 @@ def test_run_pipeline_invokes_validation_when_configured(tmp_path: Path):
     # First-pass rate should be 1.0 (compiled cleanly on first try)
     assert report.first_pass_compile_rate == 1.0
     assert report.final_pass_rate == 1.0
-    assert all(r.status == "passed" for r in report.class_results)
+    # Validated classes all passed; classes pre-skipped (e.g., protocols) are excluded.
+    validated = [r for r in report.class_results if r.validation is not None]
+    assert validated
+    assert all(r.status == "passed" for r in validated)
 
 
 def test_run_pipeline_skips_classes_importing_pod_modules(tmp_path: Path):
@@ -160,7 +165,7 @@ def test_run_pipeline_skips_classes_importing_pod_modules(tmp_path: Path):
         "import Foundation\nimport Alamofire\nclass UsesPod {}\n"
     )
     (src / "Clean.swift").write_text(
-        "import Foundation\nclass Clean {\n    func foo() {}\n}\n"
+        "import Foundation\nclass Clean {\n    func foo() -> Int { return 42 }\n}\n"
     )
 
     client = _make_client()
@@ -250,8 +255,8 @@ def test_run_pipeline_filters_classes_when_confirm_returns_subset(tmp_path: Path
     # Set up a project with two classes; confirm callback returns only one of them.
     src = tmp_path / "src"
     src.mkdir()
-    (src / "A.swift").write_text("import Foundation\nclass A {\n  func foo() {}\n}\n")
-    (src / "B.swift").write_text("import Foundation\nclass B {\n  func bar() {}\n}\n")
+    (src / "A.swift").write_text("import Foundation\nclass A {\n  func foo() -> Int { return 1 }\n}\n")
+    (src / "B.swift").write_text("import Foundation\nclass B {\n  func bar() -> Int { return 2 }\n}\n")
 
     client = _make_client()
     client.call_json.side_effect = [
