@@ -156,7 +156,7 @@ def _resolve_generation_targets(
             continue
         existing_path = existing_test_files.get(meta.name)
         if existing_path and not config.regenerate_existing:
-            covered = covered_methods_in(existing_path)
+            covered = covered_methods_in(existing_path, candidate_methods=methods)
             uncovered = [m for m in methods if m not in covered]
             if not uncovered:
                 report.class_results.append(ClassResult(

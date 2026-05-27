@@ -108,18 +108,56 @@ def find_existing_test_files(test_dir: Path) -> dict[str, Path]:
     return result
 
 
-def covered_methods_in(test_file: Path) -> set[str]:
-    """Pull method names from existing test method names like test_fooBar_scenario_..."""
+def covered_methods_in(
+    test_file: Path,
+    candidate_methods: list[str] | None = None,
+) -> set[str]:
+    """Decide which `candidate_methods` are already covered by tests in `test_file`.
+
+    Test methods come in many shapes (`test_foo_scenario_...`, `testFoo`,
+    `testFooScenario`), so naive token extraction can either over- or
+    under-match. We prefer prefix-matching against the *known* method names
+    from the class — longest match first — so `testIsShortReturnAfter5Min`
+    correctly covers `isShortReturn` and not the non-existent
+    `isShortReturnAfter5Min`. Without candidate_methods we fall back to
+    returning the raw extracted tokens (legacy behavior, used by tests).
+    """
     try:
         text = Path(test_file).read_text(errors="ignore")
     except OSError:
         return set()
-    names: set[str] = set()
+
+    raw_tokens: list[str] = []
     for match in _SWIFT_TEST_METHOD_RE.finditer(text):
-        names.add(_normalize_method_token(match.group(1)))
+        raw_tokens.append(match.group(1))
     for match in _OBJC_TEST_METHOD_RE.finditer(text):
-        names.add(_normalize_method_token(match.group(1)))
-    return names
+        raw_tokens.append(match.group(1))
+
+    if candidate_methods is None:
+        return {_normalize_method_token(t) for t in raw_tokens}
+
+    by_longest = sorted(set(candidate_methods), key=len, reverse=True)
+    covered: set[str] = set()
+    for token in raw_tokens:
+        normalized = _normalize_method_token(token)
+        for candidate in by_longest:
+            if candidate in covered:
+                continue
+            if _token_covers(normalized, candidate):
+                covered.add(candidate)
+                break
+    return covered
+
+
+def _token_covers(normalized_token: str, candidate: str) -> bool:
+    """True if `normalized_token` starts with `candidate` at a word boundary."""
+    if not candidate or not normalized_token.startswith(candidate):
+        return False
+    if len(normalized_token) == len(candidate):
+        return True
+    next_char = normalized_token[len(candidate)]
+    # Either a non-letter separator or a new CamelCase word boundary.
+    return (not next_char.isalnum()) or next_char.isupper()
 
 
 def _normalize_method_token(token: str) -> str:

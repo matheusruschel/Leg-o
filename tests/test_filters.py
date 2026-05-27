@@ -125,3 +125,55 @@ def test_covered_methods_in_extracts_swift_and_objc(tmp_path: Path):
 
 def test_covered_methods_in_missing_file_returns_empty(tmp_path: Path):
     assert covered_methods_in(tmp_path / "missing.swift") == set()
+
+
+def test_covered_methods_in_with_candidates_matches_camel_case_with_scenario(tmp_path: Path):
+    """testIsShortReturnAfterFiveMinutes should cover isShortReturn."""
+    f = tmp_path / "FooTests.swift"
+    f.write_text(
+        "import XCTest\n"
+        "class FooTests: XCTestCase {\n"
+        "    func testIsShortReturnAfterFiveMinutes() {}\n"
+        "}\n"
+    )
+    covered = covered_methods_in(f, candidate_methods=["isShortReturn", "saveSession"])
+    assert covered == {"isShortReturn"}
+
+
+def test_covered_methods_in_with_candidates_prefers_longest_match(tmp_path: Path):
+    """If both 'save' and 'saveSession' are candidates, testSaveSessionWorks should cover saveSession."""
+    f = tmp_path / "FooTests.swift"
+    f.write_text(
+        "class FooTests: XCTestCase {\n"
+        "    func testSaveSession_returnsTrue() {}\n"
+        "}\n"
+    )
+    covered = covered_methods_in(f, candidate_methods=["save", "saveSession"])
+    assert covered == {"saveSession"}
+
+
+def test_covered_methods_in_with_candidates_underscore_form(tmp_path: Path):
+    f = tmp_path / "FooTests.swift"
+    f.write_text(
+        "class FooTests: XCTestCase {\n"
+        "    func test_isShortReturn_expired_returnsTrue() {}\n"
+        "    func test_saveSession_works() {}\n"
+        "}\n"
+    )
+    covered = covered_methods_in(
+        f, candidate_methods=["isShortReturn", "saveSession", "clearSession"],
+    )
+    assert covered == {"isShortReturn", "saveSession"}
+
+
+def test_covered_methods_in_with_candidates_does_not_overmatch(tmp_path: Path):
+    """testValidate covering a method named 'val' shouldn't false-positive."""
+    f = tmp_path / "FooTests.swift"
+    f.write_text(
+        "class FooTests: XCTestCase {\n"
+        "    func testValidate_happyPath() {}\n"
+        "}\n"
+    )
+    # 'val' starts validate but with lowercase next char — should NOT count as covering 'val'.
+    covered = covered_methods_in(f, candidate_methods=["val"])
+    assert covered == set()
