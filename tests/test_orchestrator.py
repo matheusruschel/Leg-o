@@ -165,7 +165,7 @@ def test_run_pipeline_skips_classes_importing_pod_modules(tmp_path: Path):
         "import Foundation\nimport Alamofire\nclass UsesPod {}\n"
     )
     (src / "Clean.swift").write_text(
-        "import Foundation\nclass Clean {\n    func foo() -> Int { return 42 }\n}\n"
+        "import Foundation\nclass Clean {\n    func foo(x: Int) -> Int {\n        if x > 0 { return x * 2 }\n        return -1\n    }\n}\n"
     )
 
     client = _make_client()
@@ -256,8 +256,14 @@ def test_run_pipeline_filters_classes_when_confirm_returns_subset(tmp_path: Path
     # Set up a project with two classes; confirm callback returns only one of them.
     src = tmp_path / "src"
     src.mkdir()
-    (src / "A.swift").write_text("import Foundation\nclass A {\n  func foo() -> Int { return 1 }\n}\n")
-    (src / "B.swift").write_text("import Foundation\nclass B {\n  func bar() -> Int { return 2 }\n}\n")
+    (src / "A.swift").write_text(
+        "import Foundation\nclass A {\n  func foo(x: Int) -> Int {\n"
+        "    if x > 0 { return x + 1 }\n    return 0\n  }\n}\n"
+    )
+    (src / "B.swift").write_text(
+        "import Foundation\nclass B {\n  func bar(s: String) -> String {\n"
+        "    guard !s.isEmpty else { return \"empty\" }\n    return s.uppercased()\n  }\n}\n"
+    )
 
     client = _make_client()
     client.call_json.side_effect = [
@@ -290,7 +296,10 @@ def test_run_pipeline_excludes_already_covered_classes_from_plan(tmp_path: Path)
     src.mkdir()
     (src / "TokenExpiryChecker.swift").write_text(
         "import Foundation\nclass TokenExpiryChecker {\n"
-        "  func shouldRefresh() -> Bool { return true }\n}\n"
+        "  func shouldRefresh(now: Date) -> Bool {\n"
+        "    if now.timeIntervalSinceNow < 0 { return true }\n"
+        "    return false\n"
+        "  }\n}\n"
     )
     # Existing test file in the test-target dir covers shouldRefresh
     tests_dir = tmp_path / "tests"

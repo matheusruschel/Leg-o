@@ -15,9 +15,12 @@ from .filters import (
     covered_methods_in,
     detect_test_framework,
     find_existing_test_files,
+    is_builder_class,
     is_data_holder,
     is_empty_method,
     is_private_method,
+    is_system_extension,
+    is_trivial_wrapper,
     is_ui_type,
 )
 from .generator import build_context, generate_tests
@@ -82,6 +85,9 @@ class PipelineConfig:
     # Heuristic filters
     skip_ui_types: bool = True
     skip_data_holders: bool = True
+    skip_system_extensions: bool = True
+    skip_builders: bool = True
+    skip_trivial_wrappers: bool = True
     regenerate_existing: bool = False  # False → augment existing test files instead
     # Test framework: None → auto-detect from existing test files, else 'xctest' / 'swift_testing'
     framework: Optional[str] = None
@@ -150,18 +156,21 @@ def _resolve_generation_targets(
     skipped_already_covered = 0
     for meta in target_classes:
         methods = _methods_for_class(meta.name, ranked) or [m.name for m in meta.methods]
-        # Drop methods we know are empty or private; methods we can't locate
-        # on the ClassMetadata pass through.
+        # Drop methods we know are empty, private, or trivial wrappers (1-line
+        # delegate forwards / `return x.y` / `return SomeType(...)`). Methods we
+        # can't locate on the ClassMetadata pass through.
         skipped_names = {
             m.name for m in meta.methods
-            if is_empty_method(m) or is_private_method(m)
+            if is_empty_method(m)
+            or is_private_method(m)
+            or (config.skip_trivial_wrappers and is_trivial_wrapper(m))
         }
         methods = [m for m in methods if m not in skipped_names]
         if not methods:
             report.class_results.append(ClassResult(
                 class_name=meta.name, file_path=meta.file_path,
                 status="skipped",
-                error_summary="no public/internal non-empty methods to test",
+                error_summary="no substantive methods to test",
             ))
             continue
         existing_path = existing_test_files.get(meta.name)
@@ -290,9 +299,10 @@ def _apply_heuristic_filters(
     config: PipelineConfig,
     report: PipelineReport,
 ) -> list[ClassMetadata]:
-    """Drop UI types and pure data holders before paying analyze tokens."""
+    """Drop UI types, data holders, system-type extensions, and builder/DSL
+    classes before paying analyze tokens."""
     kept: list[ClassMetadata] = []
-    ui_skipped = data_skipped = 0
+    counts = {"ui": 0, "data": 0, "ext": 0, "builder": 0}
     for c in classes:
         if config.skip_ui_types:
             reason = is_ui_type(c)
@@ -301,7 +311,7 @@ def _apply_heuristic_filters(
                     class_name=c.name, file_path=c.file_path,
                     status="skipped", error_summary=reason,
                 ))
-                ui_skipped += 1
+                counts["ui"] += 1
                 continue
         if config.skip_data_holders:
             reason = is_data_holder(c)
@@ -310,12 +320,30 @@ def _apply_heuristic_filters(
                     class_name=c.name, file_path=c.file_path,
                     status="skipped", error_summary=reason,
                 ))
-                data_skipped += 1
+                counts["data"] += 1
+                continue
+        if config.skip_system_extensions:
+            reason = is_system_extension(c)
+            if reason:
+                report.class_results.append(ClassResult(
+                    class_name=c.name, file_path=c.file_path,
+                    status="skipped", error_summary=reason,
+                ))
+                counts["ext"] += 1
+                continue
+        if config.skip_builders:
+            reason = is_builder_class(c)
+            if reason:
+                report.class_results.append(ClassResult(
+                    class_name=c.name, file_path=c.file_path,
+                    status="skipped", error_summary=reason,
+                ))
+                counts["builder"] += 1
                 continue
         kept.append(c)
-    if ui_skipped or data_skipped:
-        log.info("heuristic filters skipped %d UI types, %d data holders",
-                 ui_skipped, data_skipped)
+    if any(counts.values()):
+        log.info("heuristic filters skipped %d UI, %d data, %d system-ext, %d builder",
+                 counts["ui"], counts["data"], counts["ext"], counts["builder"])
     return kept
 
 

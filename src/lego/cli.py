@@ -150,6 +150,12 @@ def analyze(
               help="Don't auto-skip UIView/UIViewController/SwiftUI View types.")
 @click.option("--include-data-holders", is_flag=True, default=False,
               help="Don't auto-skip pure data structs/enums with no logic.")
+@click.option("--include-system-extensions", is_flag=True, default=False,
+              help="Don't auto-skip extensions on Foundation/UIKit/SwiftUI types.")
+@click.option("--include-builders", is_flag=True, default=False,
+              help="Don't auto-skip builder/DSL classes (most methods return Self).")
+@click.option("--include-trivial-wrappers", is_flag=True, default=False,
+              help="Don't auto-skip 1-line delegate forwards / passthrough methods.")
 @click.option("--regenerate-existing", is_flag=True, default=False,
               help="Overwrite existing *Tests.swift files instead of augmenting them.")
 @click.option("--framework", type=click.Choice(["auto", "xctest", "swift_testing"]),
@@ -180,6 +186,9 @@ def generate(
     skip_modules: tuple[str, ...],
     include_views: bool,
     include_data_holders: bool,
+    include_system_extensions: bool,
+    include_builders: bool,
+    include_trivial_wrappers: bool,
     regenerate_existing: bool,
     framework: str,
     yes: bool,
@@ -225,6 +234,9 @@ def generate(
         extra_skip_modules=list(skip_modules),
         skip_ui_types=not include_views,
         skip_data_holders=not include_data_holders,
+        skip_system_extensions=not include_system_extensions,
+        skip_builders=not include_builders,
+        skip_trivial_wrappers=not include_trivial_wrappers,
         regenerate_existing=regenerate_existing,
         framework=None if framework == "auto" else framework,
     )

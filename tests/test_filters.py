@@ -8,9 +8,12 @@ from lego.filters import (
     filter_non_empty_methods,
     filter_testable_methods,
     find_existing_test_files,
+    is_builder_class,
     is_data_holder,
     is_empty_method,
     is_private_method,
+    is_system_extension,
+    is_trivial_wrapper,
     is_ui_type,
 )
 from lego.models import ClassMetadata, MethodMetadata
@@ -22,8 +25,11 @@ def _class(name="Foo", **kwargs) -> ClassMetadata:
     return ClassMetadata(**base)
 
 
-def _method(name="foo", body="", line_count=0, access_level="internal") -> MethodMetadata:
-    return MethodMetadata(name=name, body_text=body, line_count=line_count, access_level=access_level)
+def _method(name="foo", body="", line_count=0, access_level="internal", return_type=None) -> MethodMetadata:
+    return MethodMetadata(
+        name=name, body_text=body, line_count=line_count,
+        access_level=access_level, return_type=return_type,
+    )
 
 
 # ---- UI types ----
@@ -85,6 +91,90 @@ def test_is_data_holder_skips_class_with_logic():
         _method(name="run", body="if x { return 1 } else { return 0 }", line_count=4),
     ])
     assert is_data_holder(c) is None
+
+
+def test_is_system_extension_catches_uifont_extension():
+    c = _class(name="UIFont", is_extension=True, extends="UIFont")
+    assert is_system_extension(c) is not None
+
+
+def test_is_system_extension_catches_nsstring_extension():
+    c = _class(name="NSString", is_extension=True, extends="NSString")
+    assert is_system_extension(c) is not None
+
+
+def test_is_system_extension_catches_swiftui_font_extension():
+    c = _class(name="Font", is_extension=True, extends="Font")
+    assert is_system_extension(c) is not None
+
+
+def test_is_system_extension_ignores_extensions_on_app_types():
+    c = _class(name="WSLContent", is_extension=True, extends="WSLContent")
+    assert is_system_extension(c) is None
+
+
+def test_is_system_extension_ignores_non_extensions():
+    c = _class(name="MyService", is_extension=False)
+    assert is_system_extension(c) is None
+
+
+# ---- Builder / DSL classes ----
+
+def test_is_builder_class_catches_chainable_setter_class():
+    """All methods return Self with a tiny body — classic DSL pattern."""
+    methods = [
+        _method(name=n, return_type="AttributedStringProxy", line_count=2)
+        for n in ("font", "kern", "tracking", "foregroundColor", "backgroundColor")
+    ]
+    c = _class(name="AttributedStringProxy", methods=methods)
+    assert is_builder_class(c) is not None
+
+
+def test_is_builder_class_ignores_mixed_class():
+    """Half builders, half real methods — not a DSL."""
+    methods = [
+        _method(name="font", return_type="Proxy", line_count=2),
+        _method(name="render", return_type="String", line_count=15),
+        _method(name="validate", return_type="Bool", line_count=10),
+    ]
+    c = _class(name="Proxy", methods=methods)
+    assert is_builder_class(c) is None
+
+
+def test_is_builder_class_ignores_few_methods():
+    c = _class(name="Foo", methods=[
+        _method(name="x", return_type="Foo", line_count=1),
+        _method(name="y", return_type="Foo", line_count=1),
+    ])
+    assert is_builder_class(c) is None  # only 2 methods, below threshold
+
+
+# ---- Trivial wrappers ----
+
+def test_is_trivial_wrapper_catches_delegate_forward():
+    assert is_trivial_wrapper(_method(body="{ delegate?.foo(arg) }")) is True
+
+
+def test_is_trivial_wrapper_catches_passthrough_call():
+    assert is_trivial_wrapper(_method(body="{ self.something.foo() }")) is True
+
+
+def test_is_trivial_wrapper_catches_return_dot_access():
+    assert is_trivial_wrapper(_method(body="{ return self.x.y }")) is True
+
+
+def test_is_trivial_wrapper_catches_return_init():
+    assert is_trivial_wrapper(_method(body="{ return MyType(value: 1) }")) is True
+
+
+def test_is_trivial_wrapper_passes_real_logic():
+    assert is_trivial_wrapper(_method(body="{ if x > 0 { return 1 } else { return 0 } }")) is False
+    assert is_trivial_wrapper(_method(body="{ let y = x * 2; return y + offset }")) is False
+
+
+def test_is_trivial_wrapper_passes_empty():
+    """Empty bodies are handled by is_empty_method, not this filter."""
+    assert is_trivial_wrapper(_method(body="")) is False
 
 
 def test_is_data_holder_only_runs_on_struct_or_enum():

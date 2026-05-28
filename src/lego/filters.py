@@ -53,7 +53,119 @@ def is_ui_type(meta: ClassMetadata) -> str | None:
 # ---------------------------------------------------------------------------
 
 _CONTROL_FLOW_RE = re.compile(r"\b(if|for|while|guard|switch|do|try|throw|return)\b")
+# `return self` is the natural exit of a chainable setter, so it doesn't count
+# as "branching" for builder detection — exclude it from the control-flow check.
+_BRANCHING_RE = re.compile(r"\b(if|for|while|guard|switch|do|try|throw)\b")
 _TRIVIAL_LINE_BUDGET = 2  # methods with bodies this short are considered trivial
+
+
+# ---------------------------------------------------------------------------
+# System-framework extensions (low test value)
+# ---------------------------------------------------------------------------
+
+_EXTENSION_SYSTEM_TYPES = {
+    # Foundation
+    "NSString", "NSAttributedString", "NSMutableAttributedString",
+    "NSObject", "NSError", "NSNumber", "NSArray", "NSDictionary", "NSSet",
+    "String", "Array", "Dictionary", "Set", "Optional", "Result",
+    "Data", "Date", "URL", "URLRequest", "URLResponse", "URLSession",
+    "Int", "Double", "Float", "Bool", "Character",
+    "Notification", "NotificationCenter", "UserDefaults",
+    "DispatchQueue", "OperationQueue",
+    # UIKit
+    "UIView", "UIViewController", "UIImage", "UIColor", "UIFont",
+    "UITableView", "UITableViewCell", "UICollectionView", "UICollectionViewCell",
+    "UIButton", "UILabel", "UITextField", "UITextView", "UIScrollView",
+    "UIStackView", "UIControl", "UIWindow", "UIApplication", "UIDevice",
+    "UIBezierPath", "UIGestureRecognizer", "UIAlertController", "UINavigationController",
+    # SwiftUI
+    "Font", "Color", "View", "Image", "Text", "Shape", "EnvironmentValues",
+    # AppKit
+    "NSView", "NSViewController", "NSWindow", "NSColor", "NSFont", "NSImage",
+}
+
+
+def is_system_extension(meta: ClassMetadata) -> str | None:
+    """Extension on a Foundation/UIKit/SwiftUI/AppKit type — usually adds
+    presentation-layer helpers that aren't worth unit-testing in isolation."""
+    if meta.is_extension and meta.extends and meta.extends in _EXTENSION_SYSTEM_TYPES:
+        return f"extension on system type ({meta.extends})"
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Builder / DSL classes
+# ---------------------------------------------------------------------------
+
+def is_builder_class(meta: ClassMetadata) -> str | None:
+    """Detect builder/DSL classes whose methods almost all return self.
+
+    Example: AttributedStringProxy.font(_:) -> AttributedStringProxy; same shape
+    for paragraphStyle, foregroundColor, kern, etc. These are chainable setters,
+    not real logic — drop them.
+
+    Heuristic: a method is a "chainable setter" if its return type matches the
+    class's own name AND its body has no control-flow tokens. Class qualifies
+    as a builder when ≥75% of its methods (and at least 3) fit that shape.
+    """
+    if meta.kind not in {"class", "struct"}:
+        return None
+    methods = [m for m in meta.methods if m.name != "init"]
+    if not methods:
+        return None
+    chainable = [
+        m for m in methods
+        if m.return_type
+        and m.return_type.strip().rstrip("?!") == meta.name
+        and not _BRANCHING_RE.search(m.body_text or "")
+    ]
+    if len(methods) >= 3 and len(chainable) >= max(3, int(len(methods) * 0.75)):
+        return f"builder/DSL class ({len(chainable)}/{len(methods)} chainable setters)"
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Trivial wrapper methods
+# ---------------------------------------------------------------------------
+
+# Single function call: `delegate?.foo()` or `something.bar(x)` or `x.foo()`
+_SINGLE_CALL_RE = re.compile(
+    r"^\s*[A-Za-z_][\w.\?]*\s*\([^()]*\)\s*$"
+)
+# `return x.y` or `return x.y.z` or `return self.x` etc.
+_RETURN_DOT_RE = re.compile(r"^\s*return\s+[\w.\?]+(\s*\?\?\s*[^()]+)?\s*$")
+# `return SomeType(...)`
+_RETURN_INIT_RE = re.compile(r"^\s*return\s+[A-Z]\w*\([^()]*\)\s*$")
+
+
+def is_trivial_wrapper(m: MethodMetadata) -> bool:
+    """A single-line body that's just a function call or a return-passthrough."""
+    body = (m.body_text or "").strip()
+    if not body:
+        return False
+    stripped = body.strip("{}\n \t")
+    if not stripped:
+        return False
+    # Reject anything with multiple statements
+    lines = [ln.strip() for ln in stripped.splitlines() if ln.strip()]
+    if len(lines) != 1:
+        return False
+    line = lines[0]
+    return bool(
+        _SINGLE_CALL_RE.match(line)
+        or _RETURN_DOT_RE.match(line)
+        or _RETURN_INIT_RE.match(line)
+    )
+
+
+def filter_substantive_methods(meta: ClassMetadata) -> list[MethodMetadata]:
+    """Drop trivial wrappers and accessors on top of empty/private filtering."""
+    return [
+        m for m in meta.methods
+        if not is_empty_method(m)
+        and not is_private_method(m)
+        and not is_trivial_wrapper(m)
+    ]
 
 
 def is_data_holder(meta: ClassMetadata) -> str | None:
