@@ -105,6 +105,13 @@ For each class:
 
 ## Step 4 — Per-class testability + prioritization
 
+**Exhaustiveness requirement (no early-bail).** You MUST read EVERY class that survived Step 2's pre-filter — not a sample, not "enough to make a plan." Bailing out early once you have a handful of "good enough" candidates is the single biggest failure mode of this skill and produces materially worse plans than the lego Python pipeline (see `lego-vs-skill-comparison.md` Tables 4–6). Concretely:
+
+- Before Step 5, you must have called `Read` on every surviving source file. Track them — a TaskCreate per class or a checklist of remaining files is fine, but the count of files read must equal the count of surviving classes.
+- "I've already found N solid candidates so I'll stop" is NOT an acceptable reason to skip remaining files. Read them all, then rank.
+- If the candidate count is large (say >40 files), batch-read with multiple parallel Read calls rather than skipping. Token cost is the skill's known trade-off — accept it.
+- If a class genuinely has no testable surface after reading, record it as skipped with a specific reason ("touches Bundle.main", "only public method requires UIView in window", etc.) — do NOT silently drop it.
+
 For each surviving class:
 1. Read the source file in full.
 2. Reason about testability yourself:
@@ -112,6 +119,8 @@ For each surviving class:
    - Note blocking issues that prevent any test (e.g., global state accessed inside method, hard-coded `URLSession.shared`, file system calls without abstraction).
    - Identify which methods are testable as-is vs need refactoring first.
 3. Rank methods by priority: business logic density > error handling > side effects > complexity. Skip trivial getters/setters, plain `init`, `deinit`.
+
+**On UserDefaults specifically:** the global "never touch real UserDefaults" rule in Step 6 is about *production* UserDefaults state leaking into tests. A class whose only "untestability" is reading/writing a `UserDefaults.standard` key is still testable — set the key in `setUp`, clear it in `tearDown`, assert on the read. Do NOT skip such classes; queue them with a note that the test must clean up after itself.
 
 You do NOT need an API call per class — you can do this reasoning inline as you read. Combine results into one ranked list across all classes, then take the top `method_limit` methods.
 
